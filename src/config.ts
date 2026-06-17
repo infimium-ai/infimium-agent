@@ -1,33 +1,69 @@
 import { config as loadDotenv } from "dotenv";
-import { z } from "zod";
 
 loadDotenv();
 
-const envSchema = z
-  .object({
-    SEARCH_API_KEY: z.string().default(""),
-    SEARCH_PROVIDER: z.string().default("brave"),
-    LOCAL_DOCS_PATH: z.string().default(""),
-    CODEBASE_PATH: z.string().default(""),
-    SHELL_ALLOWLIST: z.string().default("ls,git,npm,npx")
-  })
-  .transform((env) => ({
-    searchApiKey: env.SEARCH_API_KEY,
-    searchProvider: env.SEARCH_PROVIDER,
-    localDocsPath: env.LOCAL_DOCS_PATH,
-    codebasePath: env.CODEBASE_PATH,
-    shellAllowlist: env.SHELL_ALLOWLIST.split(",")
-      .map((value) => value.trim())
-      .filter(Boolean)
-  }));
+export interface Config {
+  searchApiKey: string;
+  searchProvider: "brave" | "serp";
+  localDocsPath: string | null;
+  codebasePath: string | null;
+  shellAllowlist: string[];
+}
 
-export type InfimiumConfig = z.infer<typeof envSchema>;
+function readRequiredEnv(
+  env: NodeJS.ProcessEnv,
+  key: "SEARCH_API_KEY"
+): string {
+  const value = env[key]?.trim();
 
-export function loadConfig(
-  overrides: Partial<NodeJS.ProcessEnv> = {}
-): InfimiumConfig {
-  return envSchema.parse({
-    ...process.env,
-    ...overrides
-  });
+  if (!value) {
+    throw new Error(`Missing ${key}. Add it to your .env file.`);
+  }
+
+  return value;
+}
+
+function readSearchProvider(
+  env: NodeJS.ProcessEnv
+): Config["searchProvider"] {
+  const value = env.SEARCH_PROVIDER?.trim();
+
+  if (!value || value === "brave") {
+    return "brave";
+  }
+
+  if (value === "serp") {
+    return "serp";
+  }
+
+  throw new Error('Invalid SEARCH_PROVIDER. Expected "brave" or "serp".');
+}
+
+function readOptionalPath(
+  env: NodeJS.ProcessEnv,
+  key: "LOCAL_DOCS_PATH" | "CODEBASE_PATH"
+): string | null {
+  const value = env[key]?.trim();
+
+  return value ? value : null;
+}
+
+function readShellAllowlist(env: NodeJS.ProcessEnv): string[] {
+  const value = env.SHELL_ALLOWLIST?.trim();
+
+  if (!value) {
+    return [];
+  }
+
+  return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
+export function loadConfig(): Config {
+  return {
+    searchApiKey: readRequiredEnv(process.env, "SEARCH_API_KEY"),
+    searchProvider: readSearchProvider(process.env),
+    localDocsPath: readOptionalPath(process.env, "LOCAL_DOCS_PATH"),
+    codebasePath: readOptionalPath(process.env, "CODEBASE_PATH"),
+    shellAllowlist: readShellAllowlist(process.env)
+  };
 }

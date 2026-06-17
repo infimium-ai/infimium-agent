@@ -1,4 +1,4 @@
-import { loadConfig, type InfimiumConfig } from "./config.js";
+import { loadConfig, type Config } from "./config.js";
 import { depGraphInputSchema, depGraphTool } from "./tools/dep_graph.js";
 import { fetchUrlInputSchema, fetchUrlTool } from "./tools/fetch_url.js";
 import {
@@ -21,7 +21,7 @@ export interface ToolDefinition<TInput = unknown> {
 
 export class InfimiumServer {
   constructor(
-    public readonly config: InfimiumConfig,
+    public readonly config: Config,
     public readonly tools: ToolDefinition[]
   ) {}
 
@@ -34,7 +34,7 @@ export class InfimiumServer {
 }
 
 export function createInfimiumServer(
-  config: InfimiumConfig = loadConfig()
+  config: Config = loadConfig()
 ): InfimiumServer {
   return new InfimiumServer(config, [
     {
