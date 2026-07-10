@@ -1,17 +1,31 @@
-import { createInfimiumServer } from "./server.js";
+import { initEnv } from "./cli/init.js";
+import { runIndexCommand } from "./cli/index-cmd.js";
+import { startServer } from "./server.js";
 
-async function main() {
-  const server = createInfimiumServer();
-  const info = await server.start();
+async function main(): Promise<void> {
+  const command = process.argv[2] ?? "serve";
 
-  console.log(
-    `Infimium initialized with ${info.toolCount} tools (${server.tools
-      .map((tool) => tool.name)
-      .join(", ")}).`
-  );
+  if (command === "init") {
+    await initEnv();
+    return;
+  }
+
+  if (command === "index") {
+    await runIndexCommand();
+    return;
+  }
+
+  if (command === "serve") {
+    console.error("Infimium MCP server running...");
+    await startServer();
+    return;
+  }
+
+  throw new Error(`Unknown command: ${command}`);
 }
 
 main().catch((error: unknown) => {
-  console.error("Failed to start Infimium:", error);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Failed to start Infimium: ${message}`);
   process.exitCode = 1;
 });
