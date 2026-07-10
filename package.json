@@ -5,16 +5,22 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "test": "vitest",
+    "test": "vitest run",
     "build": "tsc"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "cheerio": "^1.0.0",
+    "chromadb": "^3.5.0",
     "dotenv": "^16.4.5",
+    "glob": "^13.0.6",
+    "pdf-parse": "^2.4.5",
+    "turndown": "^7.2.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
+    "@types/turndown": "^5.0.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
