@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 export const depGraphInputSchema = z.object({
-  entrypoint: z.string().min(1).optional(),
-  depth: z.number().int().positive().max(20).default(5)
+  file: z.string().min(1),
+  depth: z.number().int().positive().max(5).default(1)
 });
 
 export type DepGraphInput = z.infer<typeof depGraphInputSchema>;
