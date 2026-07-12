@@ -10,10 +10,7 @@ export interface Config {
   shellAllowlist: string[];
 }
 
-function readRequiredEnv(
-  env: NodeJS.ProcessEnv,
-  key: "SEARCH_API_KEY"
-): string {
+function readRequiredEnv(env: NodeJS.ProcessEnv, key: "SEARCH_API_KEY"): string {
   const value = env[key]?.trim();
 
   if (!value) {
@@ -23,9 +20,7 @@ function readRequiredEnv(
   return value;
 }
 
-function readSearchProvider(
-  env: NodeJS.ProcessEnv
-): Config["searchProvider"] {
+function readSearchProvider(env: NodeJS.ProcessEnv): Config["searchProvider"] {
   const value = env.SEARCH_PROVIDER?.trim();
 
   if (!value || value === "brave") {
@@ -55,7 +50,10 @@ function readShellAllowlist(env: NodeJS.ProcessEnv): string[] {
     return [];
   }
 
-  return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 export function loadConfig(): Config {

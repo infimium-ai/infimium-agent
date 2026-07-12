@@ -2,7 +2,8 @@ import { z } from "zod";
 
 export const queryLocalDocsInputSchema = z.object({
   query: z.string().min(1),
-  topK: z.number().int().positive().max(50).default(5)
+  namespace: z.string().optional(),
+  limit: z.number().int().positive().max(20).default(5)
 });
 
 export type QueryLocalDocsInput = z.infer<typeof queryLocalDocsInputSchema>;
