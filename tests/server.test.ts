@@ -12,9 +12,7 @@ const expectedToolNames = [
   "shell"
 ] as const;
 
-const tmpDir = process.env.TMPDIR?.startsWith("/var/")
-  ? `/private${process.env.TMPDIR}`
-  : process.env.TMPDIR;
+const tmpDir = "/private/tmp";
 
 const validToolInputs: Record<
   (typeof expectedToolNames)[number],
