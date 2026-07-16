@@ -1,59 +1,88 @@
-<div align="center">
-
-<img src="public/infimium_logo.png" alt="infimium.ai" width="120" height="120"/>
-
 # Infimium
 
-**Self-hostable TypeScript MCP server for AI agents.**
+Private search MCP for AI agents. Web · code · local docs · dependency graph — one endpoint, your machine.
 
-Web search | URL fetch | Local document RAG | Semantic code search | Dependency graph | Safe shell
+[![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
+[![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/infimium/infimium.svg?style=social)](https://github.com/infimium/infimium)
 
-</div>
+## The problem
 
-## What Is Infimium?
-
-Infimium is a local-first MCP (Model Context Protocol) server written in TypeScript. It gives AI agents a private, self-hostable tool layer for searching the web, fetching clean page content, querying local documents, searching code semantically, inspecting dependency relationships, and running allowlisted shell commands.
-
-The server currently exposes exactly six MCP tools:
-
-1. `web_search`
-2. `fetch_url`
-3. `query_local_docs`
-4. `semantic_code_search`
-5. `dep_graph`
-6. `shell`
-
-## Current Status
-
-The core tool surface is implemented:
-
-- Brave-powered web search
-- HTML fetching and Markdown extraction
-- Local document indexing and retrieval with Ollama embeddings and ChromaDB
-- Tree-sitter code parsing for JavaScript, TypeScript, and Python
-- Semantic code indexing and search with ChromaDB
-- SQLite-backed dependency graph lookup
-- Allowlisted shell execution with safety blocks and timeouts
-
-## Requirements
-
-- Node.js 18+
-- npm or pnpm
-- Ollama running locally
-- Ollama model: `nomic-embed-text`
-- ChromaDB running locally on `http://localhost:8000`
-- Brave Search API key for `web_search`
-
-Start Ollama and pull the embedding model:
-
-```bash
-/Applications/Ollama.app/Contents/Resources/ollama serve
-/Applications/Ollama.app/Contents/Resources/ollama pull nomic-embed-text
+```
+200,000 lines of code
+Agent reads everything → 💀 context blown + $$$
+grep "price calculation" → misses calcPropertyValue()
 ```
 
-Start ChromaDB separately before indexing or querying local docs/code.
+## With Infimium
 
-## Setup
+```
+tool: semantic_code_search
+query: "price calculation logic"
+
+→ services/property/calc.ts:142 · calcPropertyValue()
+→ imported by: listing.ts, tax.ts, pdf-generator.ts, calc.test.ts
+```
+
+## Tools
+
+`web_search` — Brave web search with retry and concise source snippets.
+
+`fetch_url` — fetches HTML, strips noise, returns Markdown or text.
+
+`query_local_docs` — local document RAG over `.md`, `.txt`, `.html`, and `.pdf`.
+
+`semantic_code_search` — differentiator: tree-sitter symbols + local embeddings for meaning-based code search.
+
+`dep_graph` — differentiator: SQLite import graph for "where is this defined and who imports it?"
+
+`shell` — allowlisted command runner with blocked patterns, timeout, and output caps.
+
+`status` — CLI health check for indexed docs, code symbols, dep graph relationships, watched projects, DB size, and last index time.
+
+`plan` — paid preview: scans changed projects, disambiguates, writes `plan.md`, hands it to Cursor or Claude Code.
+
+## Why self-hosted
+
+Your code index, your embeddings, your dep graph — all on your machine. Nothing leaves.
+
+- Embeddings run locally with Ollama.
+- No vendor lock-in: MCP, SQLite, ChromaDB, TypeScript.
+- Works in air-gapped environments.
+
+## Quick start
+
+```bash
+git clone https://github.com/infimium/infimium && cd infimium
+cp .env.example .env  # add your SEARCH_API_KEY
+./scripts/setup.sh
+```
+
+## Setup guide
+
+### Docker
+
+```bash
+cp .env.example .env
+```
+
+Set:
+
+```bash
+SEARCH_API_KEY=...
+LOCAL_DOCS_PATH=./docs
+CODEBASE_PATH=./code
+```
+
+Run:
+
+```bash
+./scripts/setup.sh
+```
+
+The setup script starts ChromaDB, starts Infimium, pulls `nomic-embed-text`, runs indexing, and prints the MCP config.
+
+### Local development
 
 Install dependencies:
 
@@ -61,173 +90,297 @@ Install dependencies:
 npm install
 ```
 
-Create `.env` from `.env.example`:
+Start Ollama:
 
 ```bash
-npx tsx src/index.ts init
+ollama serve
+ollama pull nomic-embed-text
 ```
 
-Configure:
+Start ChromaDB on `http://localhost:8000`.
+
+Create `.env`:
 
 ```bash
-SEARCH_API_KEY=
-SEARCH_PROVIDER=brave
-LOCAL_DOCS_PATH=
-CODEBASE_PATH=
+cp .env.example .env
+```
+
+Use local paths:
+
+```bash
+LOCAL_DOCS_PATH=/absolute/path/to/docs
+CODEBASE_PATH=/absolute/path/to/code
 OLLAMA_HOST=http://localhost:11434
-SHELL_ALLOWLIST=ls,git,npm,npx
+CHROMADB_HOST=http://localhost:8000
 ```
 
-`SEARCH_API_KEY` is required for Brave search. `LOCAL_DOCS_PATH` enables document RAG. `CODEBASE_PATH` enables semantic code search and dependency graph indexing.
-
-## CLI
-
-Run the MCP server:
+Index:
 
 ```bash
-npx tsx src/index.ts serve
+npm run index
 ```
 
-Initialize `.env`:
+Serve:
 
 ```bash
-npx tsx src/index.ts init
+npm start -- serve
 ```
 
-Index configured docs and code:
+Check status:
 
 ```bash
-npx tsx src/index.ts index
+npm run status
 ```
 
-The index command reads `LOCAL_DOCS_PATH` and `CODEBASE_PATH`. It indexes docs first, then code. The MCP server reads from ChromaDB and SQLite; indexing is the write path.
+## Tool brief
 
-## MCP Tools
+| Tool | Input | Requires | Output |
+| --- | --- | --- | --- |
+| `web_search` | `query`, `max_results` | Brave API key | ranked web results |
+| `fetch_url` | `url`, `extract` | network access | cleaned Markdown/text |
+| `query_local_docs` | `query`, `top_k` | indexed docs, Ollama, ChromaDB | matching document chunks |
+| `semantic_code_search` | `query`, `language`, `top_k` | indexed code, Ollama, ChromaDB | matching symbols with file and line range |
+| `dep_graph` | `symbol_name` | indexed code graph | definition file, importers, imports |
+| `shell` | `command`, `cwd`, `timeout` | allowlisted command | stdout, stderr, exit code |
+| `status` | none | local SQLite/ChromaDB state | index health summary |
+
+## Use the tools
+
+After adding Infimium to Claude Desktop, Cursor, or Windsurf, ask the agent to use a specific Infimium tool by name. The MCP client sends the JSON input to Infimium; you do not call these tools with HTTP.
 
 ### `web_search`
 
-Uses the Brave Search API:
+Use it for current web results.
 
-- Input: `{ query: string, max_results?: number }`
-- Retries once on rate limits or server errors
-- Returns formatted title, URL, and snippet results
+Prompt:
+
+```text
+Use Infimium web_search to find recent MCP server examples.
+```
+
+Tool input:
+
+```json
+{
+  "query": "recent MCP server examples",
+  "max_results": 5
+}
+```
+
+Requires:
+
+```bash
+SEARCH_API_KEY=...
+SEARCH_PROVIDER=brave
+```
 
 ### `fetch_url`
 
-Fetches and extracts readable web page content:
+Use it to fetch a page and extract readable content.
 
-- Input: `{ url: string, extract?: "text" | "markdown" }`
-- Removes noisy HTML elements such as nav, headers, scripts, sidebars, and ads
-- Converts cleaned HTML to Markdown with Turndown
-- Truncates output at 40,000 characters
+Prompt:
+
+```text
+Use Infimium fetch_url to fetch https://modelcontextprotocol.io and summarize it.
+```
+
+Tool input:
+
+```json
+{
+  "url": "https://modelcontextprotocol.io",
+  "extract": "markdown"
+}
+```
+
+`extract` can be `markdown` or `text`.
 
 ### `query_local_docs`
 
-Searches indexed local documents:
+Use it after indexing local documents.
 
-- Input: `{ query: string, top_k?: number }`
-- Embeds the query with Ollama `nomic-embed-text`
-- Queries ChromaDB collection `infimium_docs`
-- Deduplicates adjacent chunks from the same file
+Prompt:
+
+```text
+Use Infimium query_local_docs to find setup instructions for ChromaDB.
+```
+
+Tool input:
+
+```json
+{
+  "query": "ChromaDB setup instructions",
+  "top_k": 5
+}
+```
+
+Before using:
+
+```bash
+LOCAL_DOCS_PATH=/absolute/path/to/docs
+npm run index
+```
 
 ### `semantic_code_search`
 
-Searches indexed code by meaning, not just keywords:
+Use it to find code by meaning instead of exact text.
 
-- Input: `{ query: string, language?: string, top_k?: number }`
-- Supports JavaScript, TypeScript, and Python
-- Embeds parsed symbols and stores them in ChromaDB collection `infimium_code`
-- Returns matching symbols with file path, line range, score, and snippet
+Prompt:
+
+```text
+Use Infimium semantic_code_search to find the price calculation logic.
+```
+
+Tool input:
+
+```json
+{
+  "query": "price calculation logic",
+  "language": "typescript",
+  "top_k": 5
+}
+```
+
+Before using:
+
+```bash
+CODEBASE_PATH=/absolute/path/to/code
+npm run index
+```
+
+`language` is optional. Supported values depend on indexed files: `javascript`, `typescript`, `python`.
 
 ### `dep_graph`
 
-Inspects dependency relationships for indexed code symbols:
+Use it to see where a symbol is defined, who imports it, and what its file imports.
 
-- Input: `{ symbol_name: string }`
-- Looks up the symbol definition in SQLite
-- Returns files that import the defining file
-- Returns the files imported by the defining file
+Prompt:
+
+```text
+Use Infimium dep_graph for calcPropertyValue.
+```
+
+Tool input:
+
+```json
+{
+  "symbol_name": "calcPropertyValue"
+}
+```
+
+Before using:
+
+```bash
+CODEBASE_PATH=/absolute/path/to/code
+npm run index
+```
 
 ### `shell`
 
-Runs safe shell commands:
+Use it for safe, allowlisted local commands.
 
-- Input: `{ command: string, cwd?: string, timeout?: number }`
-- Only allows base commands listed in `SHELL_ALLOWLIST`
-- Blocks dangerous patterns such as `rm -rf`, `sudo`, `curl`, `wget`, `eval`, and inline code execution
-- Uses `child_process.spawn`
-- Caps stdout and stderr output
+Prompt:
 
-## Indexing Details
+```text
+Use Infimium shell to run git status.
+```
 
-Document indexing:
+Tool input:
 
-- Reads `.md`, `.txt`, `.html`, and `.pdf`
-- Skips `node_modules`, `.git`, `dist`, database files, and generated folders
-- Chunks content using a simple token approximation
-- Stores metadata in SQLite and vectors in ChromaDB
-- Skips unchanged files on later runs
+```json
+{
+  "command": "git status",
+  "cwd": "/absolute/path/to/repo",
+  "timeout": 30
+}
+```
 
-Code indexing:
+Allow commands explicitly:
 
-- Reads `.ts`, `.tsx`, `.js`, `.jsx`, and `.py`
-- Skips `node_modules`, `.git`, `dist`, `*.test.ts`, and `*.spec.ts`
-- Parses symbols with tree-sitter
-- Hashes files to skip unchanged code
-- Embeds each symbol body with Ollama
-- Stores symbol vectors in ChromaDB
-- Builds the dependency graph after indexing
+```bash
+SHELL_ALLOWLIST=ls,git,npm,npx
+```
 
-## Claude Desktop Example
+Blocked patterns include `rm -rf`, `sudo`, `curl`, `wget`, `eval`, and inline code execution.
 
-See `examples/claude_desktop_config.json`.
+### `status`
 
-Example shape:
+Use it from the terminal to inspect local index health.
+
+```bash
+npm run status
+```
+
+Example output:
+
+```text
+───────────────────────────
+  Infimium status
+───────────────────────────
+  Docs         47 files · 312 chunks
+  Code         847 symbols · 124 files
+  Dep graph    312 relationships
+  Projects     2 watched
+  DB size      2.1 MB
+  Last indexed 2 hours ago
+───────────────────────────
+```
+
+## Connect to Claude Desktop
 
 ```json
 {
   "mcpServers": {
     "infimium": {
       "command": "npx",
-      "args": ["tsx", "/path/to/infimium/src/index.ts", "serve"]
+      "args": ["tsx", "/absolute/path/to/infimium/src/index.ts", "serve"],
+      "env": {
+        "SEARCH_API_KEY": "your_brave_search_api_key",
+        "LOCAL_DOCS_PATH": "/absolute/path/to/docs",
+        "CODEBASE_PATH": "/absolute/path/to/code",
+        "OLLAMA_HOST": "http://localhost:11434",
+        "CHROMADB_HOST": "http://localhost:8000"
+      }
     }
   }
 }
 ```
 
-## Development
+## Connect to Cursor / Windsurf
 
-Run tests:
-
-```bash
-npm test
+```json
+{
+  "mcpServers": {
+    "infimium": {
+      "command": "npx",
+      "args": ["tsx", "/absolute/path/to/infimium/src/index.ts", "serve"],
+      "env": {
+        "SEARCH_API_KEY": "your_brave_search_api_key",
+        "LOCAL_DOCS_PATH": "/absolute/path/to/docs",
+        "CODEBASE_PATH": "/absolute/path/to/code",
+        "OLLAMA_HOST": "http://localhost:11434",
+        "CHROMADB_HOST": "http://localhost:8000"
+      }
+    }
+  }
+}
 ```
 
-Run type checks:
+## Pricing
 
-```bash
-npx tsc --noEmit
-```
+Self-host free forever (MIT). Need us to run it for you?
 
-Run the semantic code search integration test with real Ollama and ChromaDB:
+infimium.ai — starts at $12/mo, 14-day trial, no free hosted tier.
 
-```bash
-RUN_INTEGRATION=true npm test -- tests/semantic-code-search.integration.test.ts
-```
+Paid hosted glimpse:
 
-The integration test indexes the property fixture and verifies that the query `price calculation logic` returns `calcPropertyValue` in the top results.
+- Managed indexing workers for large repos and doc sets.
+- Hosted project memory and `plan.md` generation.
+- Team dashboards for index freshness, tool usage, and failures.
+- Priority language/parser support.
 
-## Storage
+## Contributing
 
-Infimium uses:
+[CONTRIBUTING.md](CONTRIBUTING.md)
 
-- ChromaDB collection `infimium_docs` for document chunks
-- ChromaDB collection `infimium_code` for parsed code symbols
-- `infimium.db` for dependency graph tables
-- `infimium_code.db` for code index hash state
-
-Generated database files are ignored by Git.
-
-## License
-
-MIT
+Adding a new language? Start here.

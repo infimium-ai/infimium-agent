@@ -7,13 +7,15 @@ import { ChromaClient, type Collection, type Metadata } from "chromadb";
 import { glob } from "glob";
 import { PDFParse } from "pdf-parse";
 
+import { createChromaClient } from "../chroma.js";
 import type { Config } from "../config.js";
+import { dataPath } from "../paths.js";
 
 const COLLECTION_NAME = "infimium_docs";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
 const CHUNK_SIZE_CHARS = 512 * 4;
 const CHUNK_OVERLAP_CHARS = 50 * 4;
-const SQLITE_DB_PATH = "infimium_docs.db";
+const SQLITE_DB_PATH = dataPath("infimium_docs.db");
 const SUPPORTED_EXTENSIONS = new Set([".md", ".txt", ".pdf", ".html"]);
 
 type DocMetadata = Metadata & {
@@ -54,7 +56,7 @@ export class DocIndexer {
 
   constructor(
     config: Pick<Config, "ollamaHost">,
-    chromaClient: ChromaClient = new ChromaClient(),
+    chromaClient: ChromaClient = createChromaClient(),
     sqlitePath: string = SQLITE_DB_PATH
   ) {
     this.chroma = chromaClient;
