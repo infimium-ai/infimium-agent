@@ -68,6 +68,73 @@ cp .env.example .env  # add your SEARCH_API_KEY
 
 ## Setup guide
 
+### npm package
+
+Requires Node.js 22.5+.
+
+Install:
+
+```bash
+npm i infimium
+```
+
+Create `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Configure:
+
+```bash
+SEARCH_API_KEY=your_brave_api_key
+SEARCH_PROVIDER=brave
+LOCAL_DOCS_PATH=/absolute/path/to/docs
+CODEBASE_PATH=/absolute/path/to/code
+OLLAMA_HOST=http://localhost:11434
+CHROMADB_HOST=http://localhost:8000
+SHELL_ALLOWLIST=ls,git,npm,npx
+```
+
+Start Ollama:
+
+```bash
+ollama serve
+ollama pull nomic-embed-text
+```
+
+Start ChromaDB on `http://localhost:8000`:
+
+```bash
+chroma run --path ./chroma_db --host localhost --port 8000
+```
+
+Or with Docker:
+
+```bash
+docker run -p 8000:8000 -v ./chroma_db:/chroma/chroma chromadb/chroma
+```
+
+Index docs and code:
+
+```bash
+npx infimium index
+```
+
+Check status:
+
+```bash
+npx infimium status
+```
+
+Serve MCP:
+
+```bash
+npx infimium serve
+```
+
+`infimium status` is not hardcoded. It reads local SQLite metadata and ChromaDB counts. If it shows `0 files`, run `npx infimium index` after setting `LOCAL_DOCS_PATH` and `CODEBASE_PATH`.
+
 ### Docker
 
 ```bash
@@ -343,7 +410,7 @@ Example output:
   "mcpServers": {
     "infimium": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/infimium/src/index.ts", "serve"],
+      "args": ["infimium", "serve"],
       "env": {
         "SEARCH_API_KEY": "your_brave_search_api_key",
         "LOCAL_DOCS_PATH": "/absolute/path/to/docs",
@@ -363,7 +430,7 @@ Example output:
   "mcpServers": {
     "infimium": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/infimium/src/index.ts", "serve"],
+      "args": ["infimium", "serve"],
       "env": {
         "SEARCH_API_KEY": "your_brave_search_api_key",
         "LOCAL_DOCS_PATH": "/absolute/path/to/docs",
