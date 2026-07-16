@@ -6,7 +6,7 @@ Private search MCP for AI agents. Web · code · local docs · dependency graph 
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/infimium/infimium.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
+[![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
 ## The problem
 
@@ -46,9 +46,11 @@ query: "price calculation logic"
 
 `shell` — allowlisted command runner with blocked patterns, timeout, and output caps.
 
+`plan` — differentiator: retrieves semantic code context and dependency edges, then drafts an implementation plan.
+
 `status` — CLI health check for indexed docs, code symbols, dep graph relationships, watched projects, DB size, and last index time.
 
-`plan` — paid preview: scans changed projects, disambiguates, writes `plan.md`, hands it to Cursor or Claude Code.
+`doctor` — CLI setup check for Node/npm, Ollama, ChromaDB, `.env`, and index readiness.
 
 ## Why self-hosted
 
@@ -67,6 +69,86 @@ cp .env.example .env  # add your SEARCH_API_KEY
 ```
 
 ## Setup guide
+
+### npm package
+
+Requires Node.js 22.5+.
+
+Install:
+
+```bash
+npm i infimium
+```
+
+Create `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Configure:
+
+```bash
+SEARCH_API_KEY=your_brave_api_key
+SEARCH_PROVIDER=brave
+LOCAL_DOCS_PATH=/absolute/path/to/docs
+CODEBASE_PATH=/absolute/path/to/code
+OLLAMA_HOST=http://localhost:11434
+CHROMADB_HOST=http://localhost:8000
+SHELL_ALLOWLIST=ls,git,npm,npx
+```
+
+Start Ollama:
+
+```bash
+ollama serve
+ollama pull nomic-embed-text
+```
+
+Start ChromaDB on `http://localhost:8000`:
+
+```bash
+chroma run --path ./chroma_db --host localhost --port 8000
+```
+
+Or with Docker:
+
+```bash
+docker run -p 8000:8000 -v ./chroma_db:/chroma/chroma chromadb/chroma
+```
+
+Index docs and code:
+
+```bash
+npx infimium index
+```
+
+Check status:
+
+```bash
+npx infimium status
+```
+
+Check setup health:
+
+```bash
+npx infimium doctor
+```
+
+Generate a grounded implementation plan:
+
+```bash
+npx infimium plan --dry-run "add rate limiting to the auth endpoint"
+npx infimium plan --write "add rate limiting to the auth endpoint"
+```
+
+Serve MCP:
+
+```bash
+npx infimium serve
+```
+
+`infimium status` is not hardcoded. It reads local SQLite metadata and ChromaDB counts. If it shows `0 files`, run `npx infimium index` after setting `LOCAL_DOCS_PATH` and `CODEBASE_PATH`.
 
 ### Docker
 
@@ -142,6 +224,18 @@ Check status:
 npm run status
 ```
 
+Check setup:
+
+```bash
+npm run doctor
+```
+
+Plan a code change:
+
+```bash
+npm run plan -- --dry-run "add rate limiting to the auth endpoint"
+```
+
 ## Tool brief
 
 | Tool | Input | Requires | Output |
@@ -152,7 +246,9 @@ npm run status
 | `semantic_code_search` | `query`, `language`, `top_k` | indexed code, Ollama, ChromaDB | matching symbols with file and line range |
 | `dep_graph` | `symbol_name` | indexed code graph | definition file, importers, imports |
 | `shell` | `command`, `cwd`, `timeout` | allowlisted command | stdout, stderr, exit code |
+| `plan` | `task`, `dry_run`, `write_plan`, `output_path`, `top_k`, `language` | indexed code, Ollama, ChromaDB | implementation plan or retrieved context |
 | `status` | none | local SQLite/ChromaDB state | index health summary |
+| `doctor` | none | local environment | setup pass/fail report |
 
 ## Use the tools
 
@@ -313,6 +409,43 @@ SHELL_ALLOWLIST=ls,git,npm,npx
 
 Blocked patterns include `rm -rf`, `sudo`, `curl`, `wget`, `eval`, and inline code execution.
 
+### `plan`
+
+Use it before editing code. It retrieves semantically relevant symbols, enriches them with dependency edges, and asks the local LLM for a safest-first implementation plan.
+
+CLI dry run:
+
+```bash
+npx infimium plan --dry-run "add rate limiting to the auth endpoint"
+```
+
+Generate and write `plan.md`:
+
+```bash
+npx infimium plan --write "add rate limiting to the auth endpoint"
+```
+
+Tool input:
+
+```json
+{
+  "task": "add rate limiting to the auth endpoint",
+  "dry_run": false,
+  "write_plan": true,
+  "output_path": "plan.md",
+  "top_k": 5
+}
+```
+
+Before using:
+
+```bash
+npx infimium doctor
+npx infimium index
+```
+
+Use `--dry-run` to inspect retrieved context without calling the LLM. If the context is bad, re-index before judging plan quality.
+
 ### `status`
 
 Use it from the terminal to inspect local index health.
@@ -320,6 +453,25 @@ Use it from the terminal to inspect local index health.
 ```bash
 npm run status
 ```
+
+### `doctor`
+
+Use it first when setup feels broken.
+
+```bash
+npx infimium doctor
+```
+
+It checks, in order:
+
+1. Node/npm version compatibility
+2. Ollama installed and running
+3. `nomic-embed-text` pulled
+4. ChromaDB reachable
+5. `.env` and required keys
+6. whether the current repo has been indexed
+
+Every failed check includes one copy-pasteable fix command. The command exits `1` if anything fails, so it works in scripts.
 
 Example output:
 
@@ -343,7 +495,7 @@ Example output:
   "mcpServers": {
     "infimium": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/infimium/src/index.ts", "serve"],
+      "args": ["infimium", "serve"],
       "env": {
         "SEARCH_API_KEY": "your_brave_search_api_key",
         "LOCAL_DOCS_PATH": "/absolute/path/to/docs",
@@ -363,7 +515,7 @@ Example output:
   "mcpServers": {
     "infimium": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/infimium/src/index.ts", "serve"],
+      "args": ["infimium", "serve"],
       "env": {
         "SEARCH_API_KEY": "your_brave_search_api_key",
         "LOCAL_DOCS_PATH": "/absolute/path/to/docs",

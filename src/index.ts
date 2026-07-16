@@ -3,6 +3,8 @@
 import { initEnv } from "./cli/init.js";
 import { runIndexCommand } from "./cli/index-cmd.js";
 import { runStatusCommand } from "./cli/status-cmd.js";
+import { runDoctorCommand } from "./commands/doctor.js";
+import { runPlanCommand } from "./commands/plan.js";
 import { startServer } from "./server.js";
 
 async function main(): Promise<void> {
@@ -20,6 +22,16 @@ async function main(): Promise<void> {
 
   if (command === "status") {
     await runStatusCommand();
+    return;
+  }
+
+  if (command === "doctor") {
+    await runDoctorCommand();
+    return;
+  }
+
+  if (command === "plan") {
+    await runPlanCommand();
     return;
   }
 
