@@ -30,6 +30,8 @@
     "start": "tsx src/index.ts",
     "index": "tsx src/index.ts index",
     "status": "tsx src/index.ts status",
+    "doctor": "tsx src/index.ts doctor",
+    "plan": "tsx src/index.ts plan",
     "test": "vitest run",
     "build": "tsc",
     "prepublishOnly": "npm run build"
