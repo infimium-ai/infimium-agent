@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
+import { runPlanTool } from "./commands/plan.js";
 import { runDepGraph } from "./tools/dep-graph.js";
 import { runFetchUrl } from "./tools/fetch-url.js";
 import { DEFAULT_OLLAMA_HOST, runQueryLocalDocs } from "./tools/query-local-docs.js";
@@ -63,6 +64,15 @@ type SemanticCodeSearchArguments = {
 
 type DepGraphArguments = {
   symbol_name: string;
+};
+
+type PlanArguments = {
+  task: string;
+  dry_run?: boolean;
+  write_plan?: boolean;
+  output_path?: string;
+  top_k?: number;
+  language?: string;
 };
 
 const toolDefinitions = [
@@ -173,6 +183,31 @@ const toolDefinitions = [
       required: ["command"],
       additionalProperties: false
     }
+  },
+  {
+    name: "plan",
+    description: "Generate a grounded implementation plan for the current repository.",
+    schema: z.object({
+      task: z.string(),
+      dry_run: z.boolean().default(false).optional(),
+      write_plan: z.boolean().default(false).optional(),
+      output_path: z.string().default("plan.md").optional(),
+      top_k: z.number().int().positive().default(5).optional(),
+      language: z.string().optional()
+    }),
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string" },
+        dry_run: { type: "boolean", default: false },
+        write_plan: { type: "boolean", default: false },
+        output_path: { type: "string", default: "plan.md" },
+        top_k: { type: "number", default: 5 },
+        language: { type: "string" }
+      },
+      required: ["task"],
+      additionalProperties: false
+    }
   }
 ] satisfies ToolDefinition[];
 
@@ -268,6 +303,22 @@ async function handleShell(args: ShellArguments): Promise<ToolResponse> {
   return textResponse(formatShellResult(result));
 }
 
+async function handlePlan(args: PlanArguments): Promise<ToolResponse> {
+  const config = loadConfig({ requireSearchApiKey: false });
+  const text = await runPlanTool({
+    task: args.task,
+    dryRun: args.dry_run ?? false,
+    writePlan: args.write_plan ?? false,
+    outputPath: args.output_path ?? "plan.md",
+    topK: args.top_k ?? 5,
+    language: args.language,
+    codebasePath: config.codebasePath ?? process.cwd(),
+    ollamaHost: config.ollamaHost
+  });
+
+  return textResponse(text);
+}
+
 async function handleWebSearch(args: WebSearchArguments): Promise<ToolResponse> {
   try {
     const text = await runWebSearch(
@@ -339,6 +390,10 @@ export function createServer(): Server {
 
     if (tool.name === "shell") {
       return handleShell(parsedArgs as ShellArguments);
+    }
+
+    if (tool.name === "plan") {
+      return handlePlan(parsedArgs as PlanArguments);
     }
 
     return placeholderResponse(tool.name);
