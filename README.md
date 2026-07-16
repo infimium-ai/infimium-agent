@@ -2,13 +2,11 @@
   <img src="public/infimium-logo.png" alt="Infimium" width="120" />
 </p>
 
-# Infimium
-
 Private search MCP for AI agents. Web · code · local docs · dependency graph — one endpoint, your machine.
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent?style=social)](https://github.com/infimium-ai/infimium-agent)
+[![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/infimium/infimium.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
 ## The problem
 
