@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -10,10 +11,15 @@ const expectedToolNames = [
   "query_local_docs",
   "semantic_code_search",
   "dep_graph",
-  "shell"
+  "shell",
+  "plan"
 ] as const;
 
 const tmpDir = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+const builtServerPath = "dist/src/index.js";
+const serverArgs = existsSync(builtServerPath)
+  ? [builtServerPath, "serve"]
+  : ["node_modules/tsx/dist/cli.mjs", "src/index.ts", "serve"];
 
 const validToolInputs: Record<
   (typeof expectedToolNames)[number],
@@ -24,7 +30,8 @@ const validToolInputs: Record<
   query_local_docs: { query: "setup", top_k: 1 },
   semantic_code_search: { query: "server", top_k: 1 },
   dep_graph: { symbol_name: "createServer" },
-  shell: { command: "ls", timeout: 1 }
+  shell: { command: "ls", timeout: 1 },
+  plan: { task: "add a doctor command", dry_run: true, top_k: 1 }
 };
 
 describe("Infimium MCP server", () => {
@@ -39,7 +46,7 @@ describe("Infimium MCP server", () => {
 
     transport = new StdioClientTransport({
       command: process.execPath,
-      args: ["node_modules/tsx/dist/cli.mjs", "src/index.ts", "serve"],
+      args: serverArgs,
       cwd: process.cwd(),
       stderr: "pipe",
       env: {
@@ -56,7 +63,7 @@ describe("Infimium MCP server", () => {
     await transport.close();
   });
 
-  it("lists exactly the six Infimium tools", async () => {
+  it("lists exactly the seven Infimium tools", async () => {
     const response = await client.listTools(undefined, { timeout: 2_000 });
     const toolNames = response.tools.map((tool) => tool.name).sort();
 
