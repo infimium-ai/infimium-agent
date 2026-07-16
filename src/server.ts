@@ -6,8 +6,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { loadConfig } from "./config.js";
+import { runDepGraph } from "./tools/dep-graph.js";
 import { runFetchUrl } from "./tools/fetch-url.js";
-import { runQueryLocalDocs } from "./tools/query-local-docs.js";
+import { DEFAULT_OLLAMA_HOST, runQueryLocalDocs } from "./tools/query-local-docs.js";
+import { runSemanticCodeSearch } from "./tools/semantic-code-search.js";
 import { formatShellResult, runShell } from "./tools/shell.js";
 import { runWebSearch } from "./tools/web-search.js";
 
@@ -51,6 +53,16 @@ type ShellArguments = {
 type QueryLocalDocsArguments = {
   query: string;
   top_k?: number;
+};
+
+type SemanticCodeSearchArguments = {
+  query: string;
+  language?: string;
+  top_k?: number;
+};
+
+type DepGraphArguments = {
+  symbol_name: string;
 };
 
 const toolDefinitions = [
@@ -200,14 +212,49 @@ function readLocalDocsPath(): string | null {
   return process.env.LOCAL_DOCS_PATH?.trim() || null;
 }
 
+function readCodebasePath(): string | null {
+  return process.env.CODEBASE_PATH?.trim() || null;
+}
+
+function readOllamaHost(): string {
+  return process.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
+}
+
 async function handleQueryLocalDocs(args: QueryLocalDocsArguments): Promise<ToolResponse> {
   const text = await runQueryLocalDocs(
-    { localDocsPath: readLocalDocsPath() },
+    {
+      localDocsPath: readLocalDocsPath(),
+      ollamaHost: readOllamaHost()
+    },
     args.query,
     args.top_k ?? 5
   );
 
   return textResponse(text);
+}
+
+async function handleSemanticCodeSearch(
+  args: SemanticCodeSearchArguments
+): Promise<ToolResponse> {
+  const text = await runSemanticCodeSearch(
+    {
+      codebasePath: readCodebasePath(),
+      ollamaHost: readOllamaHost()
+    },
+    args.query,
+    args.language,
+    args.top_k ?? 5
+  );
+
+  return textResponse(text);
+}
+
+function handleDepGraph(args: DepGraphArguments): ToolResponse {
+  return textResponse(
+    runDepGraph(args.symbol_name, {
+      codebasePath: readCodebasePath()
+    })
+  );
 }
 
 async function handleShell(args: ShellArguments): Promise<ToolResponse> {
@@ -280,6 +327,14 @@ export function createServer(): Server {
 
     if (tool.name === "query_local_docs") {
       return handleQueryLocalDocs(parsedArgs as QueryLocalDocsArguments);
+    }
+
+    if (tool.name === "semantic_code_search") {
+      return handleSemanticCodeSearch(parsedArgs as SemanticCodeSearchArguments);
+    }
+
+    if (tool.name === "dep_graph") {
+      return handleDepGraph(parsedArgs as DepGraphArguments);
     }
 
     if (tool.name === "shell") {
