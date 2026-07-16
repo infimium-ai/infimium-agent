@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { tmpdir } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const expectedToolNames = [
@@ -12,7 +13,7 @@ const expectedToolNames = [
   "shell"
 ] as const;
 
-const tmpDir = "/private/tmp";
+const tmpDir = process.platform === "darwin" ? "/private/tmp" : tmpdir();
 
 const validToolInputs: Record<
   (typeof expectedToolNames)[number],
