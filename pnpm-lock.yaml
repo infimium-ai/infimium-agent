@@ -38,6 +38,9 @@ importers:
       tree-sitter-typescript:
         specifier: 0.23.2
         version: 0.23.2(tree-sitter@0.21.1)
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.0
       turndown:
         specifier: ^7.2.0
         version: 7.2.4
@@ -51,9 +54,6 @@ importers:
       '@types/turndown':
         specifier: ^5.0.5
         version: 5.0.6
-      tsx:
-        specifier: ^4.19.2
-        version: 4.23.0
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

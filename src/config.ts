@@ -11,6 +11,10 @@ export interface Config {
   shellAllowlist: string[];
 }
 
+type LoadConfigOptions = {
+  requireSearchApiKey?: boolean;
+};
+
 function readRequiredEnv(env: NodeJS.ProcessEnv, key: "SEARCH_API_KEY"): string {
   const value = env[key]?.trim();
 
@@ -19,6 +23,14 @@ function readRequiredEnv(env: NodeJS.ProcessEnv, key: "SEARCH_API_KEY"): string 
   }
 
   return value;
+}
+
+function readSearchApiKey(env: NodeJS.ProcessEnv, required: boolean): string {
+  if (required) {
+    return readRequiredEnv(env, "SEARCH_API_KEY");
+  }
+
+  return env.SEARCH_API_KEY?.trim() ?? "";
 }
 
 function readSearchProvider(env: NodeJS.ProcessEnv): Config["searchProvider"] {
@@ -61,9 +73,11 @@ function readOllamaHost(env: NodeJS.ProcessEnv): string {
   return env.OLLAMA_HOST?.trim() || "http://localhost:11434";
 }
 
-export function loadConfig(): Config {
+export function loadConfig(options: LoadConfigOptions = {}): Config {
+  const requireSearchApiKey = options.requireSearchApiKey ?? true;
+
   return {
-    searchApiKey: readRequiredEnv(process.env, "SEARCH_API_KEY"),
+    searchApiKey: readSearchApiKey(process.env, requireSearchApiKey),
     searchProvider: readSearchProvider(process.env),
     localDocsPath: readOptionalPath(process.env, "LOCAL_DOCS_PATH"),
     codebasePath: readOptionalPath(process.env, "CODEBASE_PATH"),

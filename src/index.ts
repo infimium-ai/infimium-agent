@@ -1,5 +1,6 @@
 import { initEnv } from "./cli/init.js";
 import { runIndexCommand } from "./cli/index-cmd.js";
+import { runStatusCommand } from "./cli/status-cmd.js";
 import { startServer } from "./server.js";
 
 async function main(): Promise<void> {
@@ -12,6 +13,11 @@ async function main(): Promise<void> {
 
   if (command === "index") {
     await runIndexCommand();
+    return;
+  }
+
+  if (command === "status") {
+    await runStatusCommand();
     return;
   }
 
