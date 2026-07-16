@@ -1,6 +1,6 @@
 {
   "name": "infimium",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Private search MCP for AI agents.",
   "private": false,
   "type": "module",
