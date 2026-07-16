@@ -1,5 +1,7 @@
 import { ChromaClient } from "chromadb";
 
+import { createChromaClient } from "../chroma.js";
+
 const COLLECTION_NAME = "infimium_docs";
 export const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
@@ -70,7 +72,7 @@ export class LocalDocsSearch {
   constructor(options: LocalDocsSearchOptions) {
     this.localDocsPath = options.localDocsPath;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
-    this.chromaClient = options.chromaClient ?? new ChromaClient();
+    this.chromaClient = options.chromaClient ?? createChromaClient();
   }
 
   async search(query: string, topK: number): Promise<DocResult[]> {

@@ -1,5 +1,6 @@
 import { ChromaClient } from "chromadb";
 
+import { createChromaClient } from "../chroma.js";
 import { DEFAULT_OLLAMA_HOST } from "./query-local-docs.js";
 
 const COLLECTION_NAME = "infimium_code";
@@ -81,7 +82,7 @@ export class CodeSearchTool {
   constructor(options: CodeSearchOptions) {
     this.codebasePath = options.codebasePath;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
-    this.chromaClient = options.chromaClient ?? new ChromaClient();
+    this.chromaClient = options.chromaClient ?? createChromaClient();
   }
 
   async search(
