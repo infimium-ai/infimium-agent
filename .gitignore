@@ -3,3 +3,4 @@ node_modules
 dist
 *.db
 chroma_db/
+.DS_Store
