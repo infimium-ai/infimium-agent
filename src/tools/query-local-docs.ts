@@ -1,7 +1,7 @@
 import { ChromaClient } from "chromadb";
 
 const COLLECTION_NAME = "infimium_docs";
-const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
+export const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
 
 export type DocResult = {
@@ -79,18 +79,7 @@ export class LocalDocsSearch {
     }
 
     const collection = await this.getCollection();
-    const count = await collection.count();
-    if (count === 0) {
-      throw new LocalDocsEmptyError();
-    }
-
-    const queryEmbedding = await this.embedQuery(query);
-    const rawResults = await collection.query({
-      queryEmbeddings: [queryEmbedding],
-      nResults: topK * 2,
-      include: ["documents", "metadatas", "distances"]
-    });
-    const results = parseQueryResults(rawResults);
+    const results = await this.queryCollection(collection, query, topK);
 
     return deduplicateAdjacentChunks(results).slice(0, topK);
   }
@@ -102,6 +91,38 @@ export class LocalDocsSearch {
         embeddingFunction: null
       });
     } catch (error: unknown) {
+      if (isConnectionError(error)) {
+        throw new LocalDocsUnavailableError();
+      }
+
+      throw error;
+    }
+  }
+
+  private async queryCollection(
+    collection: CollectionLike,
+    query: string,
+    topK: number
+  ): Promise<DocResult[]> {
+    try {
+      const count = await collection.count();
+      if (count === 0) {
+        throw new LocalDocsEmptyError();
+      }
+
+      const queryEmbedding = await this.embedQuery(query);
+      const rawResults = await collection.query({
+        queryEmbeddings: [queryEmbedding],
+        nResults: topK * 2,
+        include: ["documents", "metadatas", "distances"]
+      });
+
+      return parseQueryResults(rawResults);
+    } catch (error: unknown) {
+      if (error instanceof LocalDocsEmptyError) {
+        throw error;
+      }
+
       if (isConnectionError(error)) {
         throw new LocalDocsUnavailableError();
       }
