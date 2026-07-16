@@ -90,6 +90,8 @@ Install dependencies:
 npm install
 ```
 
+Requires Node.js 22.5+.
+
 Start Ollama:
 
 ```bash
