@@ -37,8 +37,9 @@ describe("LocalDocsSearch", () => {
       })
     };
 
+    const chromaClient = fakeClient(collection);
     const output = await runQueryLocalDocs(
-      { localDocsPath: "/docs", chromaClient: fakeClient(collection) },
+      { localDocsPath: "/docs", chromaClient },
       "setup",
       1
     );
@@ -50,6 +51,10 @@ describe("LocalDocsSearch", () => {
       queryEmbeddings: [[0.1, 0.2, 0.3]],
       nResults: 2,
       include: ["documents", "metadatas", "distances"]
+    });
+    expect(chromaClient.getOrCreateCollection).toHaveBeenCalledWith({
+      name: "infimium_docs",
+      embeddingFunction: null
     });
   });
 
@@ -94,6 +99,22 @@ describe("LocalDocsSearch", () => {
     expect(output).toBe("No docs indexed. Run: infimium index");
   });
 
+  it("returns the not configured message", async () => {
+    const collection = {
+      count: vi.fn(),
+      query: vi.fn()
+    };
+
+    const output = await runQueryLocalDocs(
+      { localDocsPath: null, chromaClient: fakeClient(collection) },
+      "setup",
+      5
+    );
+
+    expect(output).toBe("Add LOCAL_DOCS_PATH to your .env");
+    expect(collection.count).not.toHaveBeenCalled();
+  });
+
   it("returns the ChromaDB unavailable message", async () => {
     const chromaClient = {
       getOrCreateCollection: vi.fn().mockRejectedValue(new Error("ECONNREFUSED 127.0.0.1:8000"))
@@ -101,6 +122,21 @@ describe("LocalDocsSearch", () => {
 
     const output = await runQueryLocalDocs(
       { localDocsPath: "/docs", chromaClient },
+      "setup",
+      5
+    );
+
+    expect(output).toBe("Local docs unavailable. Is ChromaDB running?");
+  });
+
+  it("returns the ChromaDB unavailable message when collection operations fail", async () => {
+    const collection = {
+      count: vi.fn().mockRejectedValue(new Error("connection refused")),
+      query: vi.fn()
+    };
+
+    const output = await runQueryLocalDocs(
+      { localDocsPath: "/docs", chromaClient: fakeClient(collection) },
       "setup",
       5
     );

@@ -7,6 +7,7 @@ export interface Config {
   searchProvider: "brave" | "serp";
   localDocsPath: string | null;
   codebasePath: string | null;
+  ollamaHost: string;
   shellAllowlist: string[];
 }
 
@@ -56,12 +57,17 @@ function readShellAllowlist(env: NodeJS.ProcessEnv): string[] {
     .filter(Boolean);
 }
 
+function readOllamaHost(env: NodeJS.ProcessEnv): string {
+  return env.OLLAMA_HOST?.trim() || "http://localhost:11434";
+}
+
 export function loadConfig(): Config {
   return {
     searchApiKey: readRequiredEnv(process.env, "SEARCH_API_KEY"),
     searchProvider: readSearchProvider(process.env),
     localDocsPath: readOptionalPath(process.env, "LOCAL_DOCS_PATH"),
     codebasePath: readOptionalPath(process.env, "CODEBASE_PATH"),
+    ollamaHost: readOllamaHost(process.env),
     shellAllowlist: readShellAllowlist(process.env)
   };
 }
