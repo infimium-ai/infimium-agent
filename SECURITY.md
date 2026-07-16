@@ -1,6 +1,6 @@
 # Security
 
-Report security issues to security@infimium.ai.
+Report security issues to security@infimium.com.
 
 Do not open a GitHub issue for security reports.
 
