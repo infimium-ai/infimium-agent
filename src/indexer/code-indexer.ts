@@ -6,13 +6,15 @@ import { resolve } from "node:path";
 import { ChromaClient, type Metadata } from "chromadb";
 import { glob } from "glob";
 
+import { createChromaClient } from "../chroma.js";
 import type { Config } from "../config.js";
+import { dataPath } from "../paths.js";
 import { CodeParser, type CodeSymbol } from "./code-parser.js";
 import { DepGraphBuilder, DEP_GRAPH_DB_PATH } from "./dep-graph.js";
 
 const COLLECTION_NAME = "infimium_code";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
-const SQLITE_DB_PATH = "infimium_code.db";
+const SQLITE_DB_PATH = dataPath("infimium_code.db");
 const require = createRequire(import.meta.url);
 
 export type CodeIndexStats = {
@@ -66,7 +68,7 @@ export class CodeIndexer {
 
   constructor(
     config: Pick<Config, "ollamaHost">,
-    chromaClient: ChromaClientLike = new ChromaClient(),
+    chromaClient: ChromaClientLike = createChromaClient(),
     parser: CodeParser = new CodeParser(),
     sqlitePath: string = SQLITE_DB_PATH,
     private readonly depGraphSqlitePath: string = DEP_GRAPH_DB_PATH

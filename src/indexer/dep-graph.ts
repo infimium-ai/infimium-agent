@@ -9,8 +9,11 @@ import JavaScript from "tree-sitter-javascript";
 import Python from "tree-sitter-python";
 import TypeScriptGrammars from "tree-sitter-typescript";
 
+import { createChromaClient } from "../chroma.js";
+import { dataPath } from "../paths.js";
+
 const CODE_COLLECTION_NAME = "infimium_code";
-export const DEP_GRAPH_DB_PATH = "infimium.db";
+export const DEP_GRAPH_DB_PATH = dataPath("infimium.db");
 const require = createRequire(import.meta.url);
 const { tsx, typescript } = TypeScriptGrammars;
 const JS_EXTENSIONS = new Set([".js", ".jsx", ".mjs"]);
@@ -46,7 +49,7 @@ export class DepGraphBuilder {
   private db: import("node:sqlite").DatabaseSync | null = null;
 
   constructor(
-    private readonly chromaClient: ChromaClientLike = new ChromaClient(),
+    private readonly chromaClient: ChromaClientLike = createChromaClient(),
     private readonly sqlitePath: string = DEP_GRAPH_DB_PATH
   ) {}
 
