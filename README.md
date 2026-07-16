@@ -6,7 +6,7 @@ Private search MCP for AI agents. Web · code · local docs · dependency graph 
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/infimium/infimium.svg?style=social)](https://github.com/infimium/infimium)
+[![GitHub stars](https://img.shields.io/github/stars/infimium/infimium.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
 ## The problem
 
