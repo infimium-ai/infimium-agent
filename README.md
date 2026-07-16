@@ -2,8 +2,6 @@
   <img src="public/infimium-logo.png" alt="Infimium" width="120" />
 </p>
 
-# Infimium
-
 Private search MCP for AI agents. Web · code · local docs · dependency graph — one endpoint, your machine.
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
