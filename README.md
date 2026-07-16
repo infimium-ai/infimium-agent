@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/infimium-logo.png" alt="Infimium" width="120" />
+</p>
+
 # Infimium
 
 Private search MCP for AI agents. Web · code · local docs · dependency graph — one endpoint, your machine.
@@ -8,6 +12,9 @@ Private search MCP for AI agents. Web · code · local docs · dependency graph 
 
 ## The problem
 
+Agents need precise context, but large repos make that expensive fast.
+Keyword search is brittle: it misses intent, aliases, and the symbols that actually matter.
+
 ```
 200,000 lines of code
 Agent reads everything → 💀 context blown + $$$
@@ -15,6 +22,9 @@ grep "price calculation" → misses calcPropertyValue()
 ```
 
 ## With Infimium
+
+Infimium indexes your docs, code symbols, and dependency graph locally.
+Agents ask focused tools for the right context instead of reading the whole project.
 
 ```
 tool: semantic_code_search
