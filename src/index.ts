@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { initEnv } from "./cli/init.js";
 import { runIndexCommand } from "./cli/index-cmd.js";
 import { runStatusCommand } from "./cli/status-cmd.js";

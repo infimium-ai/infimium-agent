@@ -1,8 +1,28 @@
 {
   "name": "infimium",
   "version": "0.1.0",
-  "private": true,
+  "description": "Private search MCP for AI agents.",
+  "private": false,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/infimium-ai/infimium-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/infimium-ai/infimium-agent/issues"
+  },
+  "homepage": "https://github.com/infimium-ai/infimium-agent#readme",
+  "bin": {
+    "infimium": "dist/src/index.js"
+  },
+  "files": [
+    "dist/src",
+    "examples",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
   "engines": {
     "node": ">=22.5.0"
   },
@@ -11,7 +31,8 @@
     "index": "tsx src/index.ts index",
     "status": "tsx src/index.ts status",
     "test": "vitest run",
-    "build": "tsc"
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
