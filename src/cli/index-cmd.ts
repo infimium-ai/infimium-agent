@@ -3,7 +3,7 @@ import { CodeIndexer } from "../indexer/code-indexer.js";
 import { displayPath, DocIndexer } from "../indexer/doc-indexer.js";
 
 export async function runIndexCommand(): Promise<void> {
-  const config = loadConfig();
+  const config = loadConfig({ requireSearchApiKey: false });
 
   if (!config.localDocsPath && !config.codebasePath) {
     throw new Error("Missing LOCAL_DOCS_PATH or CODEBASE_PATH. Add one to your .env file.");

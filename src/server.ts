@@ -259,7 +259,7 @@ function handleDepGraph(args: DepGraphArguments): ToolResponse {
 
 async function handleShell(args: ShellArguments): Promise<ToolResponse> {
   const result = await runShell(
-    loadConfig(),
+    loadConfig({ requireSearchApiKey: false }),
     args.command,
     args.cwd,
     args.timeout ?? 30
