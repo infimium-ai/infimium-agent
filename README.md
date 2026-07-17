@@ -34,7 +34,7 @@ query: "price calculation logic"
 
 ## Tools
 
-`web_search` — Brave web search with retry and concise source snippets.
+`web_search` — Tinyfish web search with retry and concise source snippets.
 
 `fetch_url` — fetches HTML, strips noise, returns Markdown or text.
 
@@ -60,187 +60,141 @@ Your code index, your embeddings, your dep graph — all on your machine. Nothin
 - No vendor lock-in: MCP, SQLite, ChromaDB, TypeScript.
 - Works in air-gapped environments.
 
-## Quick start
+## Quick Start
+
+Beginner path: install Docker, clone Infimium, run one command.
 
 ```bash
-git clone https://github.com/infimium/infimium && cd infimium
-cp .env.example .env  # add your SEARCH_API_KEY
+git clone https://github.com/infimium-ai/infimium-agent.git
+cd infimium-agent
 ./scripts/setup.sh
 ```
 
-## Setup guide
+That command:
 
-### npm package
+- creates `.env`
+- starts ChromaDB
+- starts Ollama inside Docker
+- pulls `nomic-embed-text`
+- indexes your docs and code
+- prints the MCP config for Cursor, Windsurf, and Claude Desktop
 
-Requires Node.js 22.5+.
+Tinyfish is optional. Add a key only if you want `web_search`:
 
-Install:
-
-```bash
-npm i infimium
+```env
+SEARCH_PROVIDER=tinyfish
+SEARCH_API_KEY=your_tinyfish_key
 ```
 
-Create `.env`:
+Without a Tinyfish key, these still work after indexing:
 
-```bash
-cp .env.example .env
+- `fetch_url`
+- `query_local_docs`
+- `semantic_code_search`
+- `dep_graph`
+- `shell`
+- `plan --dry-run`
+- `status`
+- `doctor`
+
+## Connect To Cursor
+
+After `./scripts/setup.sh`, copy the JSON it prints into Cursor MCP settings.
+
+It will look like this:
+
+```json
+{
+  "mcpServers": {
+    "infimium": {
+      "command": "docker",
+      "args": [
+        "compose",
+        "-f",
+        "/absolute/path/to/infimium-agent/docker-compose.yml",
+        "run",
+        "--rm",
+        "-T",
+        "infimium",
+        "npm",
+        "start",
+        "--",
+        "serve"
+      ]
+    }
+  }
+}
 ```
 
-Configure:
+Restart Cursor, then ask:
 
-```bash
-SEARCH_API_KEY=your_brave_api_key
-SEARCH_PROVIDER=brave
-LOCAL_DOCS_PATH=/absolute/path/to/docs
-CODEBASE_PATH=/absolute/path/to/code
-OLLAMA_HOST=http://localhost:11434
-CHROMADB_HOST=http://localhost:8000
-SHELL_ALLOWLIST=ls,git,npm,npx
+```text
+Use Infimium semantic_code_search to find the CLI doctor command.
 ```
 
-Start Ollama:
+## Check Setup
 
 ```bash
-ollama serve
-ollama pull nomic-embed-text
+docker compose run --rm infimium npm run doctor
+docker compose run --rm infimium npm run status
+docker compose run --rm infimium npm run dep-graph -- runDoctorCommand
 ```
 
-Start ChromaDB on `http://localhost:8000`:
+Expected status shape:
 
-```bash
-chroma run --path ./chroma_db --host localhost --port 8000
+```text
+Docs         1 files · 1 chunks
+Code         290 symbols · 36 files
+Dep graph    49 relationships
 ```
 
-Or with Docker:
+`Projects 0 watched` is expected. Project watching is not part of the current release.
 
-```bash
-docker run -p 8000:8000 -v ./chroma_db:/chroma/chroma chromadb/chroma
+## If Setup Fails
+
+Paste this into Cursor, Claude Code, Codex, or any coding agent:
+
+```text
+Set up Infimium in this repo for me.
+
+Goal:
+- Run ./scripts/setup.sh
+- If Docker is missing, install/start Docker or tell me the exact install step.
+- Make sure .env exists.
+- If I have a Tinyfish key, set SEARCH_PROVIDER=tinyfish and SEARCH_API_KEY in .env.
+- Start ChromaDB.
+- Start Ollama or use the Docker setup.
+- Pull nomic-embed-text.
+- Run Infimium index.
+- Run Infimium doctor and make it pass.
+- Show me the MCP JSON to paste into Cursor.
+
+Do not commit secrets.
 ```
 
-Index docs and code:
+## Local Development
 
-```bash
-npx infimium index
-```
-
-Check status:
-
-```bash
-npx infimium status
-```
-
-Check setup health:
-
-```bash
-npx infimium doctor
-```
-
-Generate a grounded implementation plan:
-
-```bash
-npx infimium plan --dry-run "add rate limiting to the auth endpoint"
-npx infimium plan --write "add rate limiting to the auth endpoint"
-```
-
-Serve MCP:
-
-```bash
-npx infimium serve
-```
-
-`infimium status` is not hardcoded. It reads local SQLite metadata and ChromaDB counts. If it shows `0 files`, run `npx infimium index` after setting `LOCAL_DOCS_PATH` and `CODEBASE_PATH`.
-
-### Docker
-
-```bash
-cp .env.example .env
-```
-
-Set:
-
-```bash
-SEARCH_API_KEY=...
-LOCAL_DOCS_PATH=./docs
-CODEBASE_PATH=./code
-```
-
-Run:
-
-```bash
-./scripts/setup.sh
-```
-
-The setup script starts ChromaDB, starts Infimium, pulls `nomic-embed-text`, runs indexing, and prints the MCP config.
-
-### Local development
-
-Install dependencies:
+For contributors working on Infimium itself:
 
 ```bash
 npm install
-```
-
-Requires Node.js 22.5+.
-
-Start Ollama:
-
-```bash
-ollama serve
-ollama pull nomic-embed-text
-```
-
-Start ChromaDB on `http://localhost:8000`.
-
-Create `.env`:
-
-```bash
-cp .env.example .env
-```
-
-Use local paths:
-
-```bash
-LOCAL_DOCS_PATH=/absolute/path/to/docs
-CODEBASE_PATH=/absolute/path/to/code
-OLLAMA_HOST=http://localhost:11434
-CHROMADB_HOST=http://localhost:8000
-```
-
-Index:
-
-```bash
-npm run index
-```
-
-Serve:
-
-```bash
-npm start -- serve
-```
-
-Check status:
-
-```bash
-npm run status
-```
-
-Check setup:
-
-```bash
-npm run doctor
-```
-
-Plan a code change:
-
-```bash
-npm run plan -- --dry-run "add rate limiting to the auth endpoint"
+npm run build
+npm test
+node dist/src/index.js doctor
+node dist/src/index.js index
+node dist/src/index.js status
+node dist/src/index.js fetch https://example.com
+node dist/src/index.js docs-search "setup guide"
+node dist/src/index.js code-search "CLI doctor command"
+node dist/src/index.js dep-graph runDoctorCommand
+node dist/src/index.js plan --dry-run "add rate limiting"
 ```
 
 ## Tool brief
 
 | Tool | Input | Requires | Output |
 | --- | --- | --- | --- |
-| `web_search` | `query`, `max_results` | Brave API key | ranked web results |
+| `web_search` | `query`, `max_results` | Tinyfish API key | ranked web results |
 | `fetch_url` | `url`, `extract` | network access | cleaned Markdown/text |
 | `query_local_docs` | `query`, `top_k` | indexed docs, Ollama, ChromaDB | matching document chunks |
 | `semantic_code_search` | `query`, `language`, `top_k` | indexed code, Ollama, ChromaDB | matching symbols with file and line range |
@@ -257,6 +211,12 @@ After adding Infimium to Claude Desktop, Cursor, or Windsurf, ask the agent to u
 ### `web_search`
 
 Use it for current web results.
+
+Terminal:
+
+```bash
+npx infimium search "who is Salman Khan" --max-results 3
+```
 
 Prompt:
 
@@ -277,12 +237,19 @@ Requires:
 
 ```bash
 SEARCH_API_KEY=...
-SEARCH_PROVIDER=brave
+SEARCH_PROVIDER=tinyfish
 ```
 
 ### `fetch_url`
 
 Use it to fetch a page and extract readable content.
+
+Terminal:
+
+```bash
+npx infimium fetch https://example.com
+npx infimium fetch https://example.com --extract text
+```
 
 Prompt:
 
@@ -304,6 +271,12 @@ Tool input:
 ### `query_local_docs`
 
 Use it after indexing local documents.
+
+Terminal:
+
+```bash
+npx infimium docs-search "setup instructions" --top-k 5
+```
 
 Prompt:
 
@@ -330,6 +303,12 @@ npm run index
 ### `semantic_code_search`
 
 Use it to find code by meaning instead of exact text.
+
+Terminal:
+
+```bash
+npx infimium code-search "price calculation logic" --language typescript --top-k 5
+```
 
 Prompt:
 
@@ -359,6 +338,12 @@ npm run index
 ### `dep_graph`
 
 Use it to see where a symbol is defined, who imports it, and what its file imports.
+
+CLI:
+
+```bash
+npx infimium dep-graph runDoctorCommand
+```
 
 Prompt:
 
@@ -488,45 +473,32 @@ Example output:
 ───────────────────────────
 ```
 
-## Connect to Claude Desktop
+## Connect To Any MCP Client
 
 ```json
 {
   "mcpServers": {
     "infimium": {
-      "command": "npx",
-      "args": ["infimium", "serve"],
-      "env": {
-        "SEARCH_API_KEY": "your_brave_search_api_key",
-        "LOCAL_DOCS_PATH": "/absolute/path/to/docs",
-        "CODEBASE_PATH": "/absolute/path/to/code",
-        "OLLAMA_HOST": "http://localhost:11434",
-        "CHROMADB_HOST": "http://localhost:8000"
-      }
+      "command": "docker",
+      "args": [
+        "compose",
+        "-f",
+        "/absolute/path/to/infimium-agent/docker-compose.yml",
+        "run",
+        "--rm",
+        "-T",
+        "infimium",
+        "npm",
+        "start",
+        "--",
+        "serve"
+      ]
     }
   }
 }
 ```
 
-## Connect to Cursor / Windsurf
-
-```json
-{
-  "mcpServers": {
-    "infimium": {
-      "command": "npx",
-      "args": ["infimium", "serve"],
-      "env": {
-        "SEARCH_API_KEY": "your_brave_search_api_key",
-        "LOCAL_DOCS_PATH": "/absolute/path/to/docs",
-        "CODEBASE_PATH": "/absolute/path/to/code",
-        "OLLAMA_HOST": "http://localhost:11434",
-        "CHROMADB_HOST": "http://localhost:8000"
-      }
-    }
-  }
-}
-```
+Replace `/absolute/path/to/infimium-agent/docker-compose.yml` with your real path. `./scripts/setup.sh` prints the exact JSON for your machine.
 
 ## Pricing
 

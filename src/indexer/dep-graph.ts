@@ -11,6 +11,7 @@ import TypeScriptGrammars from "tree-sitter-typescript";
 
 import { createChromaClient } from "../chroma.js";
 import { dataPath } from "../paths.js";
+import { CodeParser } from "./code-parser.js";
 
 const CODE_COLLECTION_NAME = "infimium_code";
 export const DEP_GRAPH_DB_PATH = dataPath("infimium.db");
@@ -50,7 +51,8 @@ export class DepGraphBuilder {
 
   constructor(
     private readonly chromaClient: ChromaClientLike = createChromaClient(),
-    private readonly sqlitePath: string = DEP_GRAPH_DB_PATH
+    private readonly sqlitePath: string = DEP_GRAPH_DB_PATH,
+    private readonly codeParser: CodeParser = new CodeParser()
   ) {}
 
   async buildGraph(dirPath: string): Promise<void> {
@@ -61,6 +63,10 @@ export class DepGraphBuilder {
     this.clearGraphTables();
 
     for (const sourceFile of files) {
+      for (const symbol of this.codeParser.parseFile(sourceFile)) {
+        this.insertSymbolLocation(symbol.name, symbol.filePath, symbol.lineStart);
+      }
+
       const imports = extractImports(sourceFile)
         .map((importPath) => resolveImport(sourceFile, importPath))
         .filter((importedFile): importedFile is string => importedFile !== null);
@@ -305,13 +311,28 @@ function resolveImport(sourceFile: string, importPath: string): string | null {
   }
 
   const basePath = resolve(dirname(sourceFile), importPath);
-  const candidates = [
-    basePath,
-    ...RESOLVE_EXTENSIONS.map((extension) => `${basePath}${extension}`),
-    ...INDEX_FILES.map((fileName) => resolve(basePath, fileName))
-  ];
+  const candidates = buildImportCandidates(basePath);
 
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function buildImportCandidates(basePath: string): string[] {
+  const extension = extname(basePath).toLowerCase();
+  const pathWithoutExtension = extension
+    ? basePath.slice(0, -extension.length)
+    : basePath;
+
+  return unique([
+    basePath,
+    ...(extension ? RESOLVE_EXTENSIONS.map((candidate) => `${pathWithoutExtension}${candidate}`) : []),
+    ...RESOLVE_EXTENSIONS.map((candidate) => `${basePath}${candidate}`),
+    ...INDEX_FILES.map((fileName) => resolve(basePath, fileName)),
+    ...(extension ? INDEX_FILES.map((fileName) => resolve(pathWithoutExtension, fileName)) : [])
+  ]);
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function unquote(value: string): string {
