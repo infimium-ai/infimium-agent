@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,5 +69,33 @@ describe("dep graph", () => {
       importedBy: [],
       imports: []
     });
+  });
+
+  it("resolves TypeScript source files imported with .js specifiers", async () => {
+    const sourceRoot = join(tempDir, "source");
+    const srcDir = join(sourceRoot, "src");
+    const commandsDir = join(srcDir, "commands");
+    await mkdir(commandsDir, { recursive: true });
+    await writeFile(
+      join(srcDir, "index.ts"),
+      'import { runDoctorCommand } from "./commands/doctor.js";\nexport function main() { return runDoctorCommand(); }\n',
+      "utf8"
+    );
+    await writeFile(
+      join(commandsDir, "doctor.ts"),
+      'export function runDoctorCommand(): string { return "ok"; }\n',
+      "utf8"
+    );
+
+    const builder = new DepGraphBuilder(fakeClient(), sqlitePath);
+    await builder.buildGraph(sourceRoot);
+    builder.close();
+
+    const tool = new DepGraphTool({ sqlitePath, codebasePath: sourceRoot });
+    const result = tool.query("runDoctorCommand");
+    tool.close();
+
+    expect(result.definedIn).toBe(join(commandsDir, "doctor.ts"));
+    expect(result.importedBy).toContain(join(srcDir, "index.ts"));
   });
 });

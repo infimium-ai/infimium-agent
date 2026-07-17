@@ -15,7 +15,37 @@ describe("WebSearchTool", () => {
     vi.unstubAllGlobals();
   });
 
-  it("formats normal Brave results", async () => {
+  it("formats normal Tinyfish results", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        results: [
+          {
+            title: "Infimium",
+            url: "https://infimium.ai",
+            snippet: "Local MCP search infrastructure."
+          }
+        ]
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const output = await runWebSearch(
+      { searchApiKey: "test-key", searchProvider: "tinyfish" },
+      "infimium",
+      1
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("https://api.search.tinyfish.ai/");
+    expect(String(url)).toContain("query=infimium");
+    expect(init?.headers).toEqual({ "X-API-Key": "test-key" });
+    expect(output).toBe(
+      "[1] Infimium\nURL: https://infimium.ai\nSnippet: Local MCP search infrastructure."
+    );
+  });
+
+  it("formats normal Brave fallback results", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock.mockResolvedValue(
       jsonResponse({
@@ -33,7 +63,7 @@ describe("WebSearchTool", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const output = await runWebSearch(
-      { searchApiKey: "test-key" },
+      { searchApiKey: "test-key", searchProvider: "brave" },
       "infimium",
       1
     );
@@ -44,13 +74,13 @@ describe("WebSearchTool", () => {
     );
   });
 
-  it("handles empty Brave results", async () => {
+  it("handles empty Tinyfish results", async () => {
     const fetchMock = vi.fn<typeof fetch>();
-    fetchMock.mockResolvedValue(jsonResponse({ web: { results: [] } }));
+    fetchMock.mockResolvedValue(jsonResponse({ results: [] }));
     vi.stubGlobal("fetch", fetchMock);
 
     const output = await runWebSearch(
-      { searchApiKey: "test-key" },
+      { searchApiKey: "test-key", searchProvider: "tinyfish" },
       "missing topic",
       5
     );
@@ -58,19 +88,19 @@ describe("WebSearchTool", () => {
     expect(output).toBe("No results found for: missing topic");
   });
 
-  it("handles Brave API errors gracefully", async () => {
+  it("handles Tinyfish API errors gracefully", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     fetchMock.mockResolvedValue(jsonResponse({ message: "unauthorized" }, 401));
     vi.stubGlobal("fetch", fetchMock);
 
     const output = await runWebSearch(
-      { searchApiKey: "test-key" },
+      { searchApiKey: "test-key", searchProvider: "tinyfish" },
       "infimium",
       5
     );
 
     expect(output).toBe(
-      "Search failed: Brave Search API failed with status 401"
+      "Search failed: Tinyfish Search API failed with status 401"
     );
   });
 });

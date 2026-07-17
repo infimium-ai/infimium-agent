@@ -16,6 +16,7 @@ const EMBEDDING_MODEL = "nomic-embed-text";
 const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
 const DEFAULT_CHROMADB_HOST = "http://localhost:8000";
 const CHECK_TIMEOUT_MS = 3000;
+const MAC_OLLAMA_BINARY = "/Applications/Ollama.app/Contents/Resources/ollama";
 
 type DoctorStatus = "pass" | "fail";
 
@@ -113,8 +114,8 @@ async function checkNodeAndNpm(packageJson: PackageJson): Promise<DoctorCheck> {
 }
 
 async function checkOllama(ollamaHost: string): Promise<DoctorCheck> {
-  const binaryExists = await commandExists("ollama");
-  if (!binaryExists) {
+  const ollamaBinary = await findOllamaBinary();
+  if (!ollamaBinary) {
     return fail(
       "Ollama",
       "Ollama binary is not installed or not available on PATH.",
@@ -128,12 +129,16 @@ async function checkOllama(ollamaHost: string): Promise<DoctorCheck> {
     return pass("Ollama", `Ollama is installed and the API is reachable at ${ollamaHost}.`);
   }
 
-  return fail("Ollama", `Ollama is installed but not running at ${ollamaHost}.`, "ollama serve");
+  return fail(
+    "Ollama",
+    `Ollama is installed but not running at ${ollamaHost}.`,
+    ollamaServeCommand(ollamaBinary)
+  );
 }
 
 async function checkEmbeddingModel(ollamaHost: string): Promise<DoctorCheck> {
-  const binaryExists = await commandExists("ollama");
-  if (!binaryExists) {
+  const ollamaBinary = await findOllamaBinary();
+  if (!ollamaBinary) {
     return fail(
       "Required embedding model",
       `Cannot check ${EMBEDDING_MODEL} because Ollama is not installed.`,
@@ -147,7 +152,7 @@ async function checkEmbeddingModel(ollamaHost: string): Promise<DoctorCheck> {
     return fail(
       "Required embedding model",
       `Cannot check ${EMBEDDING_MODEL} because Ollama is not reachable.`,
-      "ollama serve"
+      ollamaServeCommand(ollamaBinary)
     );
   }
 
@@ -164,7 +169,7 @@ async function checkEmbeddingModel(ollamaHost: string): Promise<DoctorCheck> {
   return fail(
     "Required embedding model",
     `${EMBEDDING_MODEL} is not installed in Ollama.`,
-    `ollama pull ${EMBEDDING_MODEL}`
+    `${quoteCommand(ollamaBinary)} pull ${EMBEDDING_MODEL}`
   );
 }
 
@@ -201,7 +206,6 @@ function checkConfigEnv(): DoctorCheck {
   }
 
   const requiredEnv = [
-    "SEARCH_API_KEY",
     "SEARCH_PROVIDER",
     "OLLAMA_HOST",
     "CHROMADB_HOST",
@@ -219,13 +223,16 @@ function checkConfigEnv(): DoctorCheck {
   }
 
   if (missing.length === 0) {
-    return pass("Config/env", ".env exists and required values are set.");
+    const searchStatus = process.env.SEARCH_API_KEY?.trim()
+      ? "Tinyfish web_search is configured."
+      : "SEARCH_API_KEY is empty; web_search is disabled until you add a Tinyfish key.";
+    return pass("Config/env", `.env exists and required values are set. ${searchStatus}`);
   }
 
   return fail(
     "Config/env",
     `Missing: ${missing.join(", ")}.`,
-    "printf '\\nSEARCH_API_KEY=your_brave_search_api_key\\nSEARCH_PROVIDER=brave\\nLOCAL_DOCS_PATH=./docs\\nCODEBASE_PATH=.\\nOLLAMA_HOST=http://localhost:11434\\nCHROMADB_HOST=http://localhost:8000\\nSHELL_ALLOWLIST=ls,git,npm,npx\\n' >> .env"
+    "printf '\\nSEARCH_API_KEY=your_tinyfish_api_key\\nSEARCH_PROVIDER=tinyfish\\nLOCAL_DOCS_PATH=./docs\\nCODEBASE_PATH=.\\nOLLAMA_HOST=http://localhost:11434\\nCHROMADB_HOST=http://localhost:8000\\nSHELL_ALLOWLIST=ls,git,npm,npx\\n' >> .env"
   );
 }
 
@@ -329,6 +336,18 @@ async function readCommandVersion(command: string, args: string[]): Promise<stri
 
 async function commandExists(command: string): Promise<boolean> {
   return (await readCommandVersion(command, ["--version"])) !== null;
+}
+
+async function findOllamaBinary(): Promise<string | null> {
+  if (await commandExists("ollama")) {
+    return "ollama";
+  }
+
+  if (process.platform === "darwin" && existsSync(MAC_OLLAMA_BINARY)) {
+    return MAC_OLLAMA_BINARY;
+  }
+
+  return null;
 }
 
 async function fetchJson<T>(url: string): Promise<{ ok: true; data: T } | { ok: false }> {
@@ -483,4 +502,12 @@ function ollamaInstallCommand(): string {
     default:
       return "curl -fsSL https://ollama.com/install.sh | sh && ollama serve";
   }
+}
+
+function ollamaServeCommand(binary: string): string {
+  return `${quoteCommand(binary)} serve`;
+}
+
+function quoteCommand(command: string): string {
+  return command.includes(" ") ? `"${command}"` : command;
 }

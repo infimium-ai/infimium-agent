@@ -19,4 +19,5 @@ COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 ENV NODE_ENV=production
 ENV OLLAMA_HOST=http://localhost:11434
 
-CMD ["sh", "scripts/docker-entrypoint.sh"]
+ENTRYPOINT ["sh", "scripts/docker-entrypoint.sh"]
+CMD ["npm", "start", "--", "serve"]
