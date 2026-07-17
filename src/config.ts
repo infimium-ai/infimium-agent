@@ -4,7 +4,7 @@ loadDotenv();
 
 export interface Config {
   searchApiKey: string;
-  searchProvider: "brave" | "serp";
+  searchProvider: "tinyfish" | "brave" | "serp";
   localDocsPath: string | null;
   codebasePath: string | null;
   ollamaHost: string;
@@ -36,7 +36,11 @@ function readSearchApiKey(env: NodeJS.ProcessEnv, required: boolean): string {
 function readSearchProvider(env: NodeJS.ProcessEnv): Config["searchProvider"] {
   const value = env.SEARCH_PROVIDER?.trim();
 
-  if (!value || value === "brave") {
+  if (!value || value === "tinyfish") {
+    return "tinyfish";
+  }
+
+  if (value === "brave") {
     return "brave";
   }
 
@@ -44,7 +48,7 @@ function readSearchProvider(env: NodeJS.ProcessEnv): Config["searchProvider"] {
     return "serp";
   }
 
-  throw new Error('Invalid SEARCH_PROVIDER. Expected "brave" or "serp".');
+  throw new Error('Invalid SEARCH_PROVIDER. Expected "tinyfish", "brave", or "serp".');
 }
 
 function readOptionalPath(
