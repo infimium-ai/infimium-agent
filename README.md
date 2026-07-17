@@ -215,7 +215,7 @@ Use it for current web results.
 Terminal:
 
 ```bash
-npx infimium search "who is Salman Khan" --max-results 3
+npx infimium search "tell about flutterflow latest updates" --max-results 3
 ```
 
 Prompt:
