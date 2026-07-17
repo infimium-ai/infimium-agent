@@ -5,6 +5,7 @@ services:
       - ${LOCAL_DOCS_PATH:-./docs}:/data/docs:ro
       - ${CODEBASE_PATH:-./code}:/data/code:ro
       - infimium_db:/app/data
+      - ollama_models:/root/.ollama
     env_file: .env
     environment:
       LOCAL_DOCS_PATH: /data/docs
@@ -33,3 +34,4 @@ services:
 volumes:
   infimium_db:
   chroma_data:
+  ollama_models:

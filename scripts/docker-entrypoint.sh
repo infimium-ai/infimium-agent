@@ -25,4 +25,4 @@ done
 
 ollama pull nomic-embed-text
 
-npm start -- serve
+exec "$@"
