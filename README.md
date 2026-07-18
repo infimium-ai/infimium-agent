@@ -12,11 +12,9 @@ Private context layer for AI agents. Web search, local docs, semantic code searc
 
 ## Demo
 
-<video src="https://raw.githubusercontent.com/infimium-ai/infimium-agent/main/docs/assets/infimium-demo.mp4" controls width="100%">
-  Watch the Infimium demo: https://raw.githubusercontent.com/infimium-ai/infimium-agent/main/docs/assets/infimium-demo.mp4
-</video>
+[![Infimium demo](docs/assets/infimium-demo.gif)](docs/assets/infimium-demo.mp4)
 
-[Watch the demo video](docs/assets/infimium-demo.mp4)
+[Watch the full demo video](docs/assets/infimium-demo.mp4)
 
 ## Why
 
