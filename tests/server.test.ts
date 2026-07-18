@@ -6,13 +6,16 @@ import { tmpdir } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const expectedToolNames = [
+  "hello_infimium",
   "web_search",
   "fetch_url",
   "query_local_docs",
   "semantic_code_search",
   "dep_graph",
   "shell",
-  "plan"
+  "plan",
+  "project_memory",
+  "get_context"
 ] as const;
 
 const tmpDir = process.platform === "darwin" ? "/private/tmp" : tmpdir();
@@ -25,13 +28,16 @@ const validToolInputs: Record<
   (typeof expectedToolNames)[number],
   Record<string, unknown>
 > = {
+  hello_infimium: {},
   web_search: { query: "infimium", max_results: 1 },
   fetch_url: { url: "data:text/html,<main>Hello from Infimium</main>", extract: "markdown" },
   query_local_docs: { query: "setup", top_k: 1 },
   semantic_code_search: { query: "server", top_k: 1 },
   dep_graph: { symbol_name: "createServer" },
   shell: { command: "ls", timeout: 1 },
-  plan: { task: "add a doctor command", dry_run: true, top_k: 1 }
+  plan: { task: "add a doctor command", dry_run: true, top_k: 1 },
+  project_memory: { action: "resume", limit: 1 },
+  get_context: { refresh: true, limit: 1 }
 };
 
 describe("Infimium MCP server", () => {
@@ -51,6 +57,7 @@ describe("Infimium MCP server", () => {
       stderr: "pipe",
       env: {
         ...(tmpDir ? { TMPDIR: tmpDir } : {}),
+        INFIMIUM_DATA_DIR: tmpDir,
         SEARCH_API_KEY: "test-key",
         SHELL_ALLOWLIST: "ls,sleep"
       }
@@ -63,7 +70,7 @@ describe("Infimium MCP server", () => {
     await transport.close();
   });
 
-  it("lists exactly the seven Infimium tools", async () => {
+  it("lists exactly the ten Infimium tools", async () => {
     const response = await client.listTools(undefined, { timeout: 2_000 });
     const toolNames = response.tools.map((tool) => tool.name).sort();
 
@@ -84,5 +91,22 @@ describe("Infimium MCP server", () => {
 
       expect(response.content[0]?.type).toBe("text");
     }
+  });
+
+  it("responds to the hello health probe", async () => {
+    const rawResponse = await client.callTool(
+      {
+        name: "hello_infimium",
+        arguments: {}
+      },
+      undefined,
+      { timeout: 2_000 }
+    );
+    const response = CallToolResultSchema.parse(rawResponse);
+
+    expect(response.content[0]).toEqual({
+      type: "text",
+      text: "hey-dude"
+    });
   });
 });

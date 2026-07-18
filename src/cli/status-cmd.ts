@@ -151,10 +151,25 @@ function readGraphStats(
     importRelationships: tableExists(db, "file_imports")
       ? readCount(db, "SELECT COUNT(*) AS count FROM file_imports")
       : 0,
-    watchedProjects: tableExists(db, "project_changes")
-      ? readCount(db, "SELECT COUNT(DISTINCT project_path) AS count FROM project_changes")
-      : 0
+    watchedProjects: readWatchedProjectCount(db)
   })) ?? { importRelationships: 0, watchedProjects: 0 };
+}
+
+function readWatchedProjectCount(db: Database): number {
+  const tables = ["project_changes", "project_state", "context_snapshots"].filter((tableName) =>
+    tableExists(db, tableName)
+  );
+
+  if (tables.length === 0) {
+    return 0;
+  }
+
+  return readCount(
+    db,
+    `SELECT COUNT(DISTINCT project_path) AS count FROM (${tables
+      .map((tableName) => `SELECT project_path FROM ${tableName}`)
+      .join(" UNION ")})`
+  );
 }
 
 async function readChromaCollectionCount(

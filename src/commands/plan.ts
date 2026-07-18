@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
 import { loadConfig } from "../config.js";
+import { ProjectMemoryStore } from "../memory/project-memory.js";
 import { IMPLEMENTATION_PLAN_PROMPT } from "../prompts/plan-prompt.js";
 import { DepGraphTool, type DepGraphResult } from "../tools/dep-graph.js";
 import { CodeSearchTool, type CodeResult } from "../tools/semantic-code-search.js";
@@ -42,6 +43,7 @@ export type PlanOptions = {
   codebasePath?: string | null;
   ollamaHost?: string;
   planModel?: string;
+  recordMemory?: boolean;
   searcher?: CodeSearcher;
   depGraph?: DepGraphQuerier;
   llmClient?: PlanLlmClient;
@@ -118,6 +120,14 @@ export async function createPlan(options: PlanOptions): Promise<PlanResult> {
     });
 
     if (options.dryRun) {
+      if (options.recordMemory ?? true) {
+        rememberPlanEvent({
+          codebasePath,
+          task,
+          dryRun: true
+        });
+      }
+
       return {
         task,
         dryRun: true,
@@ -139,6 +149,15 @@ export async function createPlan(options: PlanOptions): Promise<PlanResult> {
       const outputPath = resolve(options.outputPath ?? "plan.md");
       await writeFile(outputPath, formatPlanMarkdown(result, codebasePath), "utf8");
       result.writtenPath = outputPath;
+    }
+
+    if (options.recordMemory ?? true) {
+      rememberPlanEvent({
+        codebasePath,
+        task,
+        writtenPath: result.writtenPath,
+        dryRun: false
+      });
     }
 
     return result;
@@ -380,6 +399,28 @@ function readPlanModel(): string {
     process.env.OLLAMA_MODEL?.trim() ||
     DEFAULT_PLAN_MODEL
   );
+}
+
+function rememberPlanEvent(args: {
+  codebasePath: string;
+  task: string;
+  writtenPath?: string;
+  dryRun: boolean;
+}): void {
+  const store = new ProjectMemoryStore();
+  try {
+    store.remember({
+      projectPath: args.codebasePath,
+      eventType: "plan",
+      summary: args.dryRun
+        ? `Retrieved planning context for: ${args.task}`
+        : `Generated implementation plan for: ${args.task}`,
+      currentTask: args.task,
+      lastPlanPath: args.writtenPath
+    });
+  } finally {
+    store.close();
+  }
 }
 
 function normalizeBaseUrl(value: string): string {
