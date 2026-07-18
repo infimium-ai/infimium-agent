@@ -3,11 +3,18 @@
 import { initEnv } from "./cli/init.js";
 import { runIndexCommand } from "./cli/index-cmd.js";
 import { runStatusCommand } from "./cli/status-cmd.js";
+import { runWatchCommand } from "./cli/watch-cmd.js";
 import { runCodeSearchCommand } from "./commands/code-search.js";
 import { runDepGraphCommand } from "./commands/dep-graph.js";
 import { runDoctorCommand } from "./commands/doctor.js";
 import { runDocsSearchCommand } from "./commands/docs-search.js";
 import { runFetchCommand } from "./commands/fetch.js";
+import {
+  runGetContextCommand,
+  runMemoryCommand,
+  runRememberCommand,
+  runResumeCommand
+} from "./commands/memory.js";
 import { runPlanCommand } from "./commands/plan.js";
 import { runSearchCommand } from "./commands/search.js";
 import { startServer } from "./server.js";
@@ -26,8 +33,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "watch" || command === "watch-index" || command === "auto-index") {
+    await runWatchCommand(args);
+    return;
+  }
+
   if (command === "status") {
     await runStatusCommand();
+    return;
+  }
+
+  if (command === "hello" || command === "hello-infimium" || command === "hello_infimium") {
+    console.log("hey-dude");
     return;
   }
 
@@ -61,6 +78,26 @@ async function main(): Promise<void> {
 
   if (command === "dep-graph" || command === "dep_graph") {
     await runDepGraphCommand(args);
+    return;
+  }
+
+  if (command === "resume") {
+    await runResumeCommand(args);
+    return;
+  }
+
+  if (command === "get-context" || command === "get_context") {
+    await runGetContextCommand(args);
+    return;
+  }
+
+  if (command === "remember") {
+    await runRememberCommand(args);
+    return;
+  }
+
+  if (command === "memory") {
+    await runMemoryCommand(command, args);
     return;
   }
 

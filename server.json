@@ -1,0 +1,71 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.aryankumar06/infimium",
+  "description": "Private context layer for AI agents: web, docs, code search, dep graph, memory, planning.",
+  "repository": {
+    "url": "https://github.com/infimium-ai/infimium-agent",
+    "source": "github"
+  },
+  "version": "0.1.5",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "infimium",
+      "version": "0.1.5",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SEARCH_API_KEY",
+          "description": "Optional Tinyfish API key for web_search.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "SEARCH_PROVIDER",
+          "description": "Search provider. Use tinyfish for the current web_search implementation.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "CODEBASE_PATH",
+          "description": "Absolute path to the codebase Infimium should index.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "LOCAL_DOCS_PATH",
+          "description": "Absolute path to local docs Infimium should index.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "CHROMADB_HOST",
+          "description": "ChromaDB HTTP endpoint.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OLLAMA_HOST",
+          "description": "Ollama HTTP endpoint.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "SHELL_ALLOWLIST",
+          "description": "Comma-separated commands allowed by the shell tool.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

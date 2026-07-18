@@ -65,6 +65,37 @@ describe("CodeSearchTool", () => {
     });
   });
 
+  it("keeps scores nonzero for Chroma distances above one", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(embeddingResponse()));
+    const collection = {
+      count: vi.fn().mockResolvedValue(1),
+      query: vi.fn().mockResolvedValue({
+        documents: [["export function findContextLayer() {}"]],
+        metadatas: [[{
+          name: "findContextLayer",
+          filePath: "src/context.ts",
+          lineStart: 1,
+          lineEnd: 1,
+          language: "typescript"
+        }]],
+        distances: [[2]]
+      })
+    };
+
+    const output = await runSemanticCodeSearch(
+      {
+        codebasePath: "/code",
+        ollamaHost: "http://ollama.test",
+        chromaClient: fakeClient(collection)
+      },
+      "context layer",
+      undefined,
+      1
+    );
+
+    expect(output).toContain("score: 0.48");
+  });
+
   it("returns the not configured message", async () => {
     const collection = {
       count: vi.fn(),

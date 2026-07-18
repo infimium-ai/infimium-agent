@@ -5,8 +5,17 @@ import {
   ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { runIndexForProject } from "./cli/index-cmd.js";
+import { startAutoIndex } from "./cli/watch-cmd.js";
 import { loadConfig } from "./config.js";
+import {
+  resolveMemoryProjectPath,
+  runGetContextTool,
+  runProjectMemoryTool
+} from "./commands/memory.js";
 import { runPlanTool } from "./commands/plan.js";
+import { startContextLayerAutoWriter } from "./memory/context-layer.js";
+import { resolveProjectPath } from "./paths.js";
 import { runDepGraph } from "./tools/dep-graph.js";
 import { runFetchUrl } from "./tools/fetch-url.js";
 import { DEFAULT_OLLAMA_HOST, runQueryLocalDocs } from "./tools/query-local-docs.js";
@@ -54,16 +63,19 @@ type ShellArguments = {
 type QueryLocalDocsArguments = {
   query: string;
   top_k?: number;
+  project_path?: string;
 };
 
 type SemanticCodeSearchArguments = {
   query: string;
   language?: string;
   top_k?: number;
+  project_path?: string;
 };
 
 type DepGraphArguments = {
   symbol_name: string;
+  project_path?: string;
 };
 
 type PlanArguments = {
@@ -73,9 +85,35 @@ type PlanArguments = {
   output_path?: string;
   top_k?: number;
   language?: string;
+  project_path?: string;
+};
+
+type ProjectMemoryArguments = {
+  action: "resume" | "remember";
+  note?: string;
+  task?: string;
+  event_type?: "note" | "progress" | "decision" | "blocker" | "index" | "plan";
+  limit?: number;
+  project_path?: string;
+};
+
+type GetContextArguments = {
+  refresh?: boolean;
+  limit?: number;
+  project_path?: string;
 };
 
 const toolDefinitions = [
+  {
+    name: "hello_infimium",
+    description: "Health probe for the Infimium MCP server.",
+    schema: z.object({}),
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    }
+  },
   {
     name: "web_search",
     description: "Search the web for current information.",
@@ -119,13 +157,15 @@ const toolDefinitions = [
     description: "Query indexed local documentation.",
     schema: z.object({
       query: z.string(),
-      top_k: z.number().int().positive().default(5).optional()
+      top_k: z.number().int().positive().default(5).optional(),
+      project_path: z.string().optional()
     }),
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string" },
-        top_k: { type: "number", default: 5 }
+        top_k: { type: "number", default: 5 },
+        project_path: { type: "string" }
       },
       required: ["query"],
       additionalProperties: false
@@ -137,14 +177,16 @@ const toolDefinitions = [
     schema: z.object({
       query: z.string(),
       language: z.string().optional(),
-      top_k: z.number().int().positive().default(5).optional()
+      top_k: z.number().int().positive().default(5).optional(),
+      project_path: z.string().optional()
     }),
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string" },
         language: { type: "string" },
-        top_k: { type: "number", default: 5 }
+        top_k: { type: "number", default: 5 },
+        project_path: { type: "string" }
       },
       required: ["query"],
       additionalProperties: false
@@ -154,12 +196,14 @@ const toolDefinitions = [
     name: "dep_graph",
     description: "Inspect dependency relationships for a symbol.",
     schema: z.object({
-      symbol_name: z.string()
+      symbol_name: z.string(),
+      project_path: z.string().optional()
     }),
     inputSchema: {
       type: "object",
       properties: {
-        symbol_name: { type: "string" }
+        symbol_name: { type: "string" },
+        project_path: { type: "string" }
       },
       required: ["symbol_name"],
       additionalProperties: false
@@ -193,7 +237,8 @@ const toolDefinitions = [
       write_plan: z.boolean().default(false).optional(),
       output_path: z.string().default("plan.md").optional(),
       top_k: z.number().int().positive().default(5).optional(),
-      language: z.string().optional()
+      language: z.string().optional(),
+      project_path: z.string().optional()
     }),
     inputSchema: {
       type: "object",
@@ -203,9 +248,65 @@ const toolDefinitions = [
         write_plan: { type: "boolean", default: false },
         output_path: { type: "string", default: "plan.md" },
         top_k: { type: "number", default: 5 },
-        language: { type: "string" }
+        language: { type: "string" },
+        project_path: { type: "string" }
       },
       required: ["task"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "project_memory",
+    description:
+      "Remember or resume project task context across chats, agents, and IDEs. Pass project_path once when the IDE workspace differs from the MCP server cwd.",
+    schema: z.object({
+      action: z.enum(["resume", "remember"]).default("resume"),
+      note: z.string().optional(),
+      task: z.string().optional(),
+      event_type: z
+        .enum(["note", "progress", "decision", "blocker", "index", "plan"])
+        .default("note")
+        .optional(),
+      limit: z.number().int().positive().default(8).optional(),
+      project_path: z.string().optional()
+    }),
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["resume", "remember"],
+          default: "resume"
+        },
+        note: { type: "string" },
+        task: { type: "string" },
+        event_type: {
+          type: "string",
+          enum: ["note", "progress", "decision", "blocker", "index", "plan"],
+          default: "note"
+        },
+        limit: { type: "number", default: 8 },
+        project_path: { type: "string" }
+      },
+      additionalProperties: false
+    }
+  },
+  {
+    name: "get_context",
+    description:
+      "Read the compact JSON context layer for this project. Pass project_path once to activate the current IDE workspace as the default.",
+    schema: z.object({
+      refresh: z.boolean().default(true).optional(),
+      limit: z.number().int().positive().default(8).optional(),
+      project_path: z.string().optional()
+    }),
+    inputSchema: {
+      type: "object",
+      properties: {
+        refresh: { type: "boolean", default: true },
+        limit: { type: "number", default: 8 },
+        project_path: { type: "string" }
+      },
       additionalProperties: false
     }
   }
@@ -255,10 +356,37 @@ function readOllamaHost(): string {
   return process.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
 }
 
+const indexingProjects = new Set<string>();
+
+function indexProjectInBackground(projectPath?: string | null): void {
+  if (!projectPath?.trim()) {
+    return;
+  }
+
+  const resolvedProjectPath = resolveProjectPath(projectPath);
+  if (indexingProjects.has(resolvedProjectPath)) {
+    return;
+  }
+
+  indexingProjects.add(resolvedProjectPath);
+  void runIndexForProject(resolvedProjectPath)
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Background index failed for ${resolvedProjectPath}: ${message}`);
+    })
+    .finally(() => {
+      indexingProjects.delete(resolvedProjectPath);
+    });
+}
+
 async function handleQueryLocalDocs(args: QueryLocalDocsArguments): Promise<ToolResponse> {
+  indexProjectInBackground(args.project_path);
+  const localDocsPath = args.project_path
+    ? resolveProjectPath(args.project_path)
+    : readLocalDocsPath();
   const text = await runQueryLocalDocs(
     {
-      localDocsPath: readLocalDocsPath(),
+      localDocsPath,
       ollamaHost: readOllamaHost()
     },
     args.query,
@@ -271,9 +399,13 @@ async function handleQueryLocalDocs(args: QueryLocalDocsArguments): Promise<Tool
 async function handleSemanticCodeSearch(
   args: SemanticCodeSearchArguments
 ): Promise<ToolResponse> {
+  indexProjectInBackground(args.project_path);
+  const projectPath = args.project_path
+    ? resolveProjectPath(args.project_path)
+    : resolveMemoryProjectPath(readCodebasePath());
   const text = await runSemanticCodeSearch(
     {
-      codebasePath: readCodebasePath(),
+      codebasePath: projectPath,
       ollamaHost: readOllamaHost()
     },
     args.query,
@@ -285,9 +417,13 @@ async function handleSemanticCodeSearch(
 }
 
 function handleDepGraph(args: DepGraphArguments): ToolResponse {
+  indexProjectInBackground(args.project_path);
+  const projectPath = args.project_path
+    ? resolveProjectPath(args.project_path)
+    : resolveMemoryProjectPath(readCodebasePath());
   return textResponse(
     runDepGraph(args.symbol_name, {
-      codebasePath: readCodebasePath()
+      codebasePath: projectPath
     })
   );
 }
@@ -305,6 +441,10 @@ async function handleShell(args: ShellArguments): Promise<ToolResponse> {
 
 async function handlePlan(args: PlanArguments): Promise<ToolResponse> {
   const config = loadConfig({ requireSearchApiKey: false });
+  indexProjectInBackground(args.project_path);
+  const codebasePath = args.project_path
+    ? resolveProjectPath(args.project_path)
+    : resolveMemoryProjectPath(config.codebasePath);
   const text = await runPlanTool({
     task: args.task,
     dryRun: args.dry_run ?? false,
@@ -312,11 +452,21 @@ async function handlePlan(args: PlanArguments): Promise<ToolResponse> {
     outputPath: args.output_path ?? "plan.md",
     topK: args.top_k ?? 5,
     language: args.language,
-    codebasePath: config.codebasePath ?? process.cwd(),
+    codebasePath,
     ollamaHost: config.ollamaHost
   });
 
   return textResponse(text);
+}
+
+function handleProjectMemory(args: ProjectMemoryArguments): ToolResponse {
+  indexProjectInBackground(args.project_path);
+  return textResponse(runProjectMemoryTool(args));
+}
+
+async function handleGetContext(args: GetContextArguments): Promise<ToolResponse> {
+  indexProjectInBackground(args.project_path);
+  return textResponse(await runGetContextTool(args));
 }
 
 async function handleWebSearch(args: WebSearchArguments): Promise<ToolResponse> {
@@ -368,6 +518,10 @@ export function createServer(): Server {
 
     const parsedArgs = tool.schema.parse(request.params.arguments ?? {});
 
+    if (tool.name === "hello_infimium") {
+      return textResponse("hey-dude");
+    }
+
     if (tool.name === "web_search") {
       return handleWebSearch(parsedArgs as WebSearchArguments);
     }
@@ -396,6 +550,14 @@ export function createServer(): Server {
       return handlePlan(parsedArgs as PlanArguments);
     }
 
+    if (tool.name === "project_memory") {
+      return handleProjectMemory(parsedArgs as ProjectMemoryArguments);
+    }
+
+    if (tool.name === "get_context") {
+      return handleGetContext(parsedArgs as GetContextArguments);
+    }
+
     return placeholderResponse(tool.name);
   });
 
@@ -405,6 +567,26 @@ export function createServer(): Server {
 export async function startServer(): Promise<void> {
   const server = createServer();
   const transport = new StdioServerTransport();
+  const config = loadConfig({ requireSearchApiKey: false });
+  const contextLayer = startContextLayerAutoWriter({
+    projectPath: resolveMemoryProjectPath(config.codebasePath),
+    activateProject: false
+  });
+  const autoIndex =
+    process.env.INFIMIUM_AUTO_INDEX?.trim() === "false"
+      ? null
+      : await startAutoIndex({
+          onLog: (message) => console.error(message)
+        }).catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`Auto-index disabled: ${message}`);
+          return null;
+        });
+
+  process.once("exit", () => {
+    contextLayer.stop();
+    autoIndex?.stop();
+  });
 
   await server.connect(transport);
 }

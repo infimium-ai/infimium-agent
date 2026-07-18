@@ -45,7 +45,7 @@ describe("LocalDocsSearch", () => {
     );
 
     expect(output).toBe(
-      "[1] /docs/setup.md (chunk 3 · score 0.92)\nThe setup guide content"
+      "[1] /docs/setup.md (chunk 3 · score 0.93)\nThe setup guide content"
     );
     expect(collection.query).toHaveBeenCalledWith({
       queryEmbeddings: [[0.1, 0.2, 0.3]],

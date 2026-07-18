@@ -187,7 +187,7 @@ function parseQueryResults(result: QueryResultLike): DocResult[] {
 }
 
 function distanceToScore(distance: number): number {
-  return Math.max(0, Math.min(1, 1 - distance));
+  return 1 / (1 + Math.log1p(Math.max(0, distance)));
 }
 
 function deduplicateAdjacentChunks(results: DocResult[]): DocResult[] {
