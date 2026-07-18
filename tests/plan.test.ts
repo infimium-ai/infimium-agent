@@ -51,6 +51,7 @@ describe("plan command", () => {
     const result = await createPlan({
       task: "add a doctor command",
       dryRun: true,
+      recordMemory: false,
       codebasePath: "/repo",
       searcher: fakeSearcher([codeResult]),
       depGraph: fakeDepGraph(depGraphResult)
@@ -87,6 +88,7 @@ describe("plan command", () => {
       task: "add a doctor command",
       writePlan: true,
       outputPath,
+      recordMemory: false,
       codebasePath: "/repo",
       searcher: fakeSearcher([codeResult]),
       depGraph: fakeDepGraph(depGraphResult),

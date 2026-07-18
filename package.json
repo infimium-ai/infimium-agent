@@ -1,8 +1,9 @@
 {
   "name": "infimium",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "Private search MCP for AI agents.",
   "private": false,
+  "mcpName": "io.github.aryankumar06/infimium",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -19,6 +20,8 @@
   "files": [
     "dist/src",
     "examples",
+    "server.json",
+    "public/infimium-logo.png",
     "README.md",
     "LICENSE",
     ".env.example"
@@ -29,11 +32,16 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "index": "tsx src/index.ts index",
+    "watch": "tsx src/index.ts watch",
+    "hello": "tsx src/index.ts hello",
     "search": "tsx src/index.ts search",
     "fetch": "tsx src/index.ts fetch",
     "code-search": "tsx src/index.ts code-search",
     "docs-search": "tsx src/index.ts docs-search",
     "dep-graph": "tsx src/index.ts dep-graph",
+    "get-context": "tsx src/index.ts get-context",
+    "resume": "tsx src/index.ts resume",
+    "remember": "tsx src/index.ts remember",
     "status": "tsx src/index.ts status",
     "doctor": "tsx src/index.ts doctor",
     "plan": "tsx src/index.ts plan",

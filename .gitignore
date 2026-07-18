@@ -6,5 +6,6 @@ node_modules
 dist
 *.db
 chroma_db/
+context/layer.md
 .DS_Store
 infimium-agent/
