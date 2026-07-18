@@ -10,6 +10,14 @@ Private context layer for AI agents. Web search, local docs, semantic code searc
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
+## Demo
+
+<video src="https://raw.githubusercontent.com/infimium-ai/infimium-agent/main/docs/assets/infimium-demo.mp4" controls width="100%">
+  Watch the Infimium demo: https://raw.githubusercontent.com/infimium-ai/infimium-agent/main/docs/assets/infimium-demo.mp4
+</video>
+
+[Watch the demo video](docs/assets/infimium-demo.mp4)
+
 ## Why
 
 Agents lose context when repos get big. They either read too much, burn tokens, or miss the real function because keyword search is not enough.
