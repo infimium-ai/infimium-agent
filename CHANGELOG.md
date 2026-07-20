@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed `expand_symbol` on fresh installations before the first index.
+- Isolated MCP subprocess test data to prevent parallel CI database races.
+
 ## 0.2.0
 
 ### Context foundation
