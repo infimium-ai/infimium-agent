@@ -50,7 +50,8 @@ describe("LocalDocsSearch", () => {
     expect(collection.query).toHaveBeenCalledWith({
       queryEmbeddings: [[0.1, 0.2, 0.3]],
       nResults: 2,
-      include: ["documents", "metadatas", "distances"]
+      include: ["documents", "metadatas", "distances"],
+      where: { projectPath: { $eq: "/docs" } }
     });
     expect(chromaClient.getOrCreateCollection).toHaveBeenCalledWith({
       name: "infimium_docs",

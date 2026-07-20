@@ -38,13 +38,14 @@ query: "price calculation logic"
 
 ## What Works Now
 
-- MCP server with 10 tools.
+- MCP server with 11 tools.
 - CLI for the same tools.
-- Local code/doc indexing with Ollama + ChromaDB.
+- Local code/doc indexing with Ollama + ChromaDB for JavaScript, TypeScript, Python, and Dart.
 - Dependency graph from imports.
+- Automatic exclusion of build output, dependencies, caches, Flutter artifacts, and binaries.
 - Auto-index while the MCP server runs.
 - Project memory across chats, agents, and IDEs.
-- Compact context handoff file at `context/layer.md`.
+- Project-scoped YAML context with repo overview, task, Git state, and index health.
 - Setup checker with copy-paste fixes: `npx infimium doctor`.
 
 ## Quick Start
@@ -67,6 +68,8 @@ SEARCH_API_KEY=your_tinyfish_key
 ```
 
 No search key? Fine. Code search, docs search, dep graph, memory, context, fetch, shell, status, and doctor still work.
+
+Infimium respects `.gitignore`. Add optional project-specific exclusions to `.infimiumignore`.
 
 ## Connect To Cursor, Windsurf, Or Claude
 
@@ -110,7 +113,8 @@ If the agent is in a different workspace than the MCP server, ask it to pass `pr
 | `web_search` | Tinyfish web search. Requires `SEARCH_API_KEY`. |
 | `fetch_url` | Fetch a URL and extract readable Markdown/text. |
 | `query_local_docs` | Search indexed `.md`, `.txt`, `.html`, and `.pdf` docs. |
-| `semantic_code_search` | Search code by meaning using tree-sitter symbols + local embeddings. |
+| `semantic_code_search` | Search code by meaning and return compact symbol signatures. |
+| `expand_symbol` | Load one full implementation after semantic search identifies it. |
 | `dep_graph` | Find where a symbol is defined, who imports it, and what it imports. |
 | `shell` | Run allowlisted shell commands with timeout and output caps. |
 | `plan` | Build a grounded implementation plan from code search + dep graph context. |
@@ -128,12 +132,14 @@ npx infimium hello
 npx infimium search "latest MCP registry news"
 npx infimium fetch https://example.com
 npx infimium code-search "context layer writer"
+npx infimium expand-symbol ContextLayerWriter
 npx infimium docs-search "setup"
 npx infimium dep-graph startServer
 npx infimium plan --dry-run "add rate limiting"
 npx infimium remember "Finished setup" --type progress --task "Launch prep"
 npx infimium resume
-npx infimium get-context
+npx infimium get-context                    # YAML by default
+npx infimium get-context --format json      # optional compatibility output
 ```
 
 Check health:
@@ -206,9 +212,9 @@ Infimium indexes your repo into:
 
 - SQLite: index metadata, project memory, dependency graph.
 - ChromaDB: local vector search over docs and code symbols.
-- `context/layer.md`: compact JSON handoff for new agents.
+- `context/<projectId>/layer.md`: compact YAML handoff for the active project.
 
-When `infimium serve` is running, it refreshes context every 5 minutes and auto-indexes changed files. A fresh agent should call `get_context` first, then use `semantic_code_search`, `dep_graph`, and `query_local_docs` before editing.
+The context includes a centralized repo overview, current task, recent memory, project-only index health, and a capped summary of relevant Git activity. When `infimium serve` is running, it refreshes every 5 minutes and auto-indexes changed files. A fresh agent should call `get_context` first, use `semantic_code_search` for signatures, and call `expand_symbol` only when full code is required.
 
 ## Privacy
 
@@ -218,6 +224,12 @@ Self-hosted means your code index, embeddings, docs, dependency graph, and memor
 - ChromaDB and SQLite run locally.
 - Web search only sends the search query to your configured provider.
 - Telemetry is off unless configured in a future release.
+
+## Upcoming MCP Tools
+
+`code_review` — review a change and its graph-connected impact, not the entire repository.
+
+It extends the Infimium context layer by combining semantic code search, dependency graph context, and changed-file detection. The goal is grounded reviews with less unnecessary context usage across Cursor, Claude, Codex, Windsurf, and other MCP-compatible agents.
 
 ## Paid Hosted Glimpse
 
@@ -235,3 +247,5 @@ Hosted Infimium will focus on:
 [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Adding a new language? Start there.
+
+Future architecture work is tracked in [docs/roadmap.md](docs/roadmap.md).

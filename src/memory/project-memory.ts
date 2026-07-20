@@ -43,9 +43,17 @@ export type ProjectResumeContext = {
 export type ProjectContextSnapshotRecord = {
   projectPath: string;
   filePath: string;
-  snapshotJson: string;
+  snapshotText: string;
+  format: "yaml" | "json";
   updatedAt: number;
   activateProject?: boolean;
+};
+
+export type ProjectOverviewRecord = {
+  projectId: string;
+  projectPath: string;
+  overviewJson: string;
+  updatedAt: number;
 };
 
 export type RememberInput = {
@@ -166,6 +174,8 @@ export class ProjectMemoryStore {
            UNION
            SELECT project_path FROM context_snapshots
            UNION
+           SELECT project_path FROM project_overviews
+           UNION
            SELECT project_path FROM active_project
          )`
       )
@@ -184,6 +194,8 @@ export class ProjectMemoryStore {
            SELECT project_path FROM project_state
            UNION
            SELECT project_path FROM context_snapshots
+           UNION
+           SELECT project_path FROM project_overviews
            UNION
            SELECT project_path FROM active_project
          )
@@ -204,22 +216,23 @@ export class ProjectMemoryStore {
     this.db
       .prepare(
         `INSERT INTO context_snapshots
-          (project_path, file_path, snapshot_json, updated_at)
-         VALUES (?, ?, ?, ?)
+          (project_path, file_path, snapshot_json, snapshot_format, updated_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(project_path) DO UPDATE SET
           file_path = excluded.file_path,
           snapshot_json = excluded.snapshot_json,
+          snapshot_format = excluded.snapshot_format,
           updated_at = excluded.updated_at`
       )
-      .run(projectPath, input.filePath, input.snapshotJson, updatedAt);
+      .run(projectPath, input.filePath, input.snapshotText, input.format, updatedAt);
 
     this.db
       .prepare(
         `INSERT INTO context_snapshot_history
-          (project_path, file_path, snapshot_json, updated_at)
-         VALUES (?, ?, ?, ?)`
+          (project_path, file_path, snapshot_json, snapshot_format, updated_at)
+         VALUES (?, ?, ?, ?, ?)`
       )
-      .run(projectPath, input.filePath, input.snapshotJson, updatedAt);
+      .run(projectPath, input.filePath, input.snapshotText, input.format, updatedAt);
 
     if (input.activateProject ?? true) {
       this.setActiveProjectPath(projectPath, updatedAt);
@@ -229,7 +242,7 @@ export class ProjectMemoryStore {
   getLatestContextSnapshot(projectPath: string = process.cwd()): ProjectContextSnapshotRecord | null {
     const row = this.db
       .prepare(
-        `SELECT project_path, file_path, snapshot_json, updated_at
+        `SELECT project_path, file_path, snapshot_json, snapshot_format, updated_at
          FROM context_snapshots
          WHERE project_path = ?`
       )
@@ -237,21 +250,60 @@ export class ProjectMemoryStore {
         project_path?: unknown;
         file_path?: unknown;
         snapshot_json?: unknown;
+        snapshot_format?: unknown;
         updated_at?: unknown;
       } | undefined;
 
-    const snapshotJson = readString(row?.snapshot_json);
+    const snapshotText = readString(row?.snapshot_json);
     const filePath = readString(row?.file_path);
-    if (!snapshotJson || !filePath) {
+    if (!snapshotText || !filePath) {
       return null;
     }
 
     return {
       projectPath: readString(row?.project_path) ?? resolve(projectPath),
       filePath,
-      snapshotJson,
+      snapshotText,
+      format: row?.snapshot_format === "json" ? "json" : "yaml",
       updatedAt: readNullableNumber(row, "updated_at") ?? 0
     };
+  }
+
+  saveProjectOverview(input: ProjectOverviewRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_overviews
+          (project_id, project_path, overview_json, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(project_id) DO UPDATE SET
+          project_path = excluded.project_path,
+          overview_json = excluded.overview_json,
+          updated_at = excluded.updated_at`
+      )
+      .run(input.projectId, resolve(input.projectPath), input.overviewJson, input.updatedAt);
+  }
+
+  getProjectOverview(projectPath: string): ProjectOverviewRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT project_id, project_path, overview_json, updated_at
+         FROM project_overviews
+         WHERE project_path = ?`
+      )
+      .get(resolve(projectPath)) as {
+        project_id?: unknown;
+        project_path?: unknown;
+        overview_json?: unknown;
+        updated_at?: unknown;
+      } | undefined;
+    const projectId = readString(row?.project_id);
+    const storedPath = readString(row?.project_path);
+    const overviewJson = readString(row?.overview_json);
+    const updatedAt = readNullableNumber(row, "updated_at");
+    if (!projectId || !storedPath || !overviewJson || updatedAt === null) {
+      return null;
+    }
+    return { projectId, projectPath: storedPath, overviewJson, updatedAt };
   }
 
   close(): void {
@@ -280,6 +332,7 @@ export class ProjectMemoryStore {
         project_path TEXT PRIMARY KEY,
         file_path TEXT NOT NULL,
         snapshot_json TEXT NOT NULL,
+        snapshot_format TEXT NOT NULL DEFAULT 'json',
         updated_at INTEGER NOT NULL
       );
 
@@ -287,12 +340,20 @@ export class ProjectMemoryStore {
         project_path TEXT NOT NULL,
         file_path TEXT NOT NULL,
         snapshot_json TEXT NOT NULL,
+        snapshot_format TEXT NOT NULL DEFAULT 'json',
         updated_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS active_project (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         project_path TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS project_overviews (
+        project_id TEXT PRIMARY KEY,
+        project_path TEXT NOT NULL UNIQUE,
+        overview_json TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
 
@@ -307,6 +368,8 @@ export class ProjectMemoryStore {
     this.ensureColumn("project_changes", "summary", "TEXT");
     this.ensureColumn("project_changes", "details", "TEXT");
     this.ensureColumn("project_changes", "created_at", "INTEGER");
+    this.ensureColumn("context_snapshots", "snapshot_format", "TEXT NOT NULL DEFAULT 'json'");
+    this.ensureColumn("context_snapshot_history", "snapshot_format", "TEXT NOT NULL DEFAULT 'json'");
   }
 
   private ensureColumn(tableName: string, columnName: string, columnType: string): void {

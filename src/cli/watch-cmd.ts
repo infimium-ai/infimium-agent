@@ -4,6 +4,10 @@ import { resolve } from "node:path";
 import { glob } from "glob";
 
 import { loadConfig } from "../config.js";
+import {
+  createProjectFilePolicy,
+  filterProjectFiles
+} from "../indexer/project-files.js";
 import { ProjectMemoryStore } from "../memory/project-memory.js";
 import { runIndexForPaths, runIndexForProject } from "./index-cmd.js";
 
@@ -168,25 +172,21 @@ async function readFingerprint(roots: string[]): Promise<string> {
 
 async function findIndexableFiles(roots: string[]): Promise<string[]> {
   const matches = await Promise.all(
-    roots.map((root) =>
-      glob("**/*.{md,txt,pdf,html,ts,tsx,js,jsx,py}", {
+    roots.map(async (root) => {
+      const policy = await createProjectFilePolicy(root);
+      const rootMatches = await glob("**/*.{md,txt,pdf,html,ts,tsx,js,jsx,py,dart}", {
         cwd: root,
         absolute: true,
         nodir: true,
         ignore: [
-          "**/node_modules/**",
-          "**/.git/**",
-          "**/dist/**",
-          "**/chroma_db/**",
-          "**/*.db",
+          ...policy.globIgnorePatterns,
           "**/*.test.ts",
           "**/*.spec.ts",
-          "**/.env",
-          "**/.env.*",
           "**/context/layer.md"
         ]
-      })
-    )
+      });
+      return filterProjectFiles(rootMatches, policy);
+    })
   );
 
   return [...new Set(matches.flat())];

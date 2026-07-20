@@ -11,6 +11,7 @@ const expectedToolNames = [
   "fetch_url",
   "query_local_docs",
   "semantic_code_search",
+  "expand_symbol",
   "dep_graph",
   "shell",
   "plan",
@@ -33,6 +34,7 @@ const validToolInputs: Record<
   fetch_url: { url: "data:text/html,<main>Hello from Infimium</main>", extract: "markdown" },
   query_local_docs: { query: "setup", top_k: 1 },
   semantic_code_search: { query: "server", top_k: 1 },
+  expand_symbol: { symbol_name: "createServer" },
   dep_graph: { symbol_name: "createServer" },
   shell: { command: "ls", timeout: 1 },
   plan: { task: "add a doctor command", dry_run: true, top_k: 1 },
@@ -70,7 +72,7 @@ describe("Infimium MCP server", () => {
     await transport.close();
   });
 
-  it("lists exactly the ten Infimium tools", async () => {
+  it("lists exactly the eleven Infimium tools", async () => {
     const response = await client.listTools(undefined, { timeout: 2_000 });
     const toolNames = response.tools.map((tool) => tool.name).sort();
 

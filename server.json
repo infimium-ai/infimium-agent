@@ -7,12 +7,12 @@
     "url": "https://github.com/infimium-ai/infimium-agent",
     "source": "github"
   },
-  "version": "0.1.6",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "infimium",
-      "version": "0.1.6",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       },
