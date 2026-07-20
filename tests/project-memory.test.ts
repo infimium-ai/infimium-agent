@@ -87,7 +87,8 @@ describe("project memory", () => {
       store.saveContextSnapshot({
         projectPath: "/repo-b",
         filePath: "/repo-b/context/layer.md",
-        snapshotJson: "{}",
+        snapshotText: "schemaVersion: 2\n",
+        format: "yaml",
         updatedAt: 2_000
       });
 

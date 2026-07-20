@@ -17,6 +17,7 @@ import { runPlanTool } from "./commands/plan.js";
 import { startContextLayerAutoWriter } from "./memory/context-layer.js";
 import { resolveProjectPath } from "./paths.js";
 import { runDepGraph } from "./tools/dep-graph.js";
+import { expandSymbol } from "./tools/expand-symbol.js";
 import { runFetchUrl } from "./tools/fetch-url.js";
 import { DEFAULT_OLLAMA_HOST, runQueryLocalDocs } from "./tools/query-local-docs.js";
 import { runSemanticCodeSearch } from "./tools/semantic-code-search.js";
@@ -73,6 +74,12 @@ type SemanticCodeSearchArguments = {
   project_path?: string;
 };
 
+type ExpandSymbolArguments = {
+  symbol_name: string;
+  file_path?: string;
+  project_path?: string;
+};
+
 type DepGraphArguments = {
   symbol_name: string;
   project_path?: string;
@@ -100,6 +107,7 @@ type ProjectMemoryArguments = {
 type GetContextArguments = {
   refresh?: boolean;
   limit?: number;
+  format?: "yaml" | "json";
   project_path?: string;
 };
 
@@ -173,7 +181,7 @@ const toolDefinitions = [
   },
   {
     name: "semantic_code_search",
-    description: "Search code semantically across the configured codebase.",
+    description: "Search code semantically and return compact symbol signatures.",
     schema: z.object({
       query: z.string(),
       language: z.string().optional(),
@@ -189,6 +197,25 @@ const toolDefinitions = [
         project_path: { type: "string" }
       },
       required: ["query"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "expand_symbol",
+    description: "Load the full implementation of one symbol returned by semantic_code_search.",
+    schema: z.object({
+      symbol_name: z.string(),
+      file_path: z.string().optional(),
+      project_path: z.string().optional()
+    }),
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbol_name: { type: "string" },
+        file_path: { type: "string" },
+        project_path: { type: "string" }
+      },
+      required: ["symbol_name"],
       additionalProperties: false
     }
   },
@@ -294,10 +321,11 @@ const toolDefinitions = [
   {
     name: "get_context",
     description:
-      "Read the compact JSON context layer for this project. Pass project_path once to activate the current IDE workspace as the default.",
+      "Read the compact YAML context layer and project overview. Pass project_path once to activate the current IDE workspace as the default.",
     schema: z.object({
       refresh: z.boolean().default(true).optional(),
       limit: z.number().int().positive().default(8).optional(),
+      format: z.enum(["yaml", "json"]).default("yaml").optional(),
       project_path: z.string().optional()
     }),
     inputSchema: {
@@ -305,6 +333,11 @@ const toolDefinitions = [
       properties: {
         refresh: { type: "boolean", default: true },
         limit: { type: "number", default: 8 },
+        format: {
+          type: "string",
+          enum: ["yaml", "json"],
+          default: "yaml"
+        },
         project_path: { type: "string" }
       },
       additionalProperties: false
@@ -428,6 +461,19 @@ function handleDepGraph(args: DepGraphArguments): ToolResponse {
   );
 }
 
+function handleExpandSymbol(args: ExpandSymbolArguments): ToolResponse {
+  const projectPath = args.project_path
+    ? resolveProjectPath(args.project_path)
+    : resolveMemoryProjectPath(readCodebasePath());
+  return textResponse(
+    expandSymbol({
+      codebasePath: projectPath,
+      symbolName: args.symbol_name,
+      filePath: args.file_path
+    })
+  );
+}
+
 async function handleShell(args: ShellArguments): Promise<ToolResponse> {
   const result = await runShell(
     loadConfig({ requireSearchApiKey: false }),
@@ -492,7 +538,7 @@ export function createServer(): Server {
   const server = new Server(
     {
       name: "infimium",
-      version: "0.1.0"
+      version: "0.2.0"
     },
     {
       capabilities: {
@@ -536,6 +582,10 @@ export function createServer(): Server {
 
     if (tool.name === "semantic_code_search") {
       return handleSemanticCodeSearch(parsedArgs as SemanticCodeSearchArguments);
+    }
+
+    if (tool.name === "expand_symbol") {
+      return handleExpandSymbol(parsedArgs as ExpandSymbolArguments);
     }
 
     if (tool.name === "dep_graph") {

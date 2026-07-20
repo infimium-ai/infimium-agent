@@ -28,6 +28,7 @@ type StatusOptions = {
   graphDbPath?: string;
   chromaClient?: ChromaClientLike;
   nowMs?: number;
+  projectPath?: string;
 };
 
 type InfimiumStatus = {
@@ -64,13 +65,16 @@ export async function readInfimiumStatus(
     return null;
   }
 
-  const docsStats = readDocsStats(docsDbPath);
-  const codeStats = readCodeStats(codeDbPath);
-  const graphStats = readGraphStats(graphDbPath);
-  const chromaChunks = await readChromaCollectionCount(
-    options.chromaClient ?? createChromaClient(),
-    DOCS_COLLECTION_NAME
-  );
+  const projectPath = options.projectPath ? resolve(options.projectPath) : null;
+  const docsStats = readDocsStats(docsDbPath, projectPath);
+  const codeStats = readCodeStats(codeDbPath, projectPath);
+  const graphStats = readGraphStats(graphDbPath, projectPath);
+  const chromaChunks = projectPath
+    ? null
+    : await readChromaCollectionCount(
+        options.chromaClient ?? createChromaClient(),
+        DOCS_COLLECTION_NAME
+      );
 
   return {
     docsFiles: docsStats.files,
@@ -99,17 +103,27 @@ export function formatStatus(status: InfimiumStatus, nowMs: number = Date.now())
   ].join("\n");
 }
 
-function readDocsStats(dbPath: string): { files: number; chunks: number } {
+function readDocsStats(
+  dbPath: string,
+  projectPath: string | null
+): { files: number; chunks: number } {
   return withExistingDb(dbPath, (db) => {
     if (!tableExists(db, "indexed_docs")) {
       return { files: 0, chunks: 0 };
     }
 
-    const row = db
-      .prepare(
-        "SELECT COUNT(*) AS files, COALESCE(SUM(chunk_count), 0) AS chunks FROM indexed_docs"
-      )
-      .get() as NumberRow | undefined;
+    const row = projectPath
+      ? db
+          .prepare(
+            `SELECT COUNT(*) AS files, COALESCE(SUM(chunk_count), 0) AS chunks
+             FROM indexed_docs WHERE file_path = ? OR file_path LIKE ?`
+          )
+          .get(projectPath, `${projectPath}/%`) as NumberRow | undefined
+      : db
+          .prepare(
+            "SELECT COUNT(*) AS files, COALESCE(SUM(chunk_count), 0) AS chunks FROM indexed_docs"
+          )
+          .get() as NumberRow | undefined;
 
     return {
       files: readNumber(row, "files"),
@@ -119,22 +133,25 @@ function readDocsStats(dbPath: string): { files: number; chunks: number } {
 }
 
 function readCodeStats(
-  dbPath: string
+  dbPath: string,
+  projectPath: string | null
 ): { files: number; symbols: number; lastIndexedAt: number | null } {
   return withExistingDb(dbPath, (db) => {
     if (!tableExists(db, "indexed_code_files")) {
       return { files: 0, symbols: 0, lastIndexedAt: null };
     }
 
-    const row = db
-      .prepare(
+    const baseSql =
         `SELECT
           COUNT(*) AS files,
           COALESCE(SUM(symbol_count), 0) AS symbols,
           MAX(indexed_at) AS lastIndexedAt
-         FROM indexed_code_files`
-      )
-      .get() as NumberRow | undefined;
+         FROM indexed_code_files`;
+    const row = projectPath
+      ? db
+          .prepare(`${baseSql} WHERE file_path = ? OR file_path LIKE ?`)
+          .get(projectPath, `${projectPath}/%`) as NumberRow | undefined
+      : db.prepare(baseSql).get() as NumberRow | undefined;
 
     return {
       files: readNumber(row, "files"),
@@ -145,11 +162,18 @@ function readCodeStats(
 }
 
 function readGraphStats(
-  dbPath: string
+  dbPath: string,
+  projectPath: string | null
 ): { importRelationships: number; watchedProjects: number } {
   return withExistingDb(dbPath, (db) => ({
     importRelationships: tableExists(db, "file_imports")
-      ? readCount(db, "SELECT COUNT(*) AS count FROM file_imports")
+      ? projectPath
+        ? readParameterizedCount(
+            db,
+            "SELECT COUNT(*) AS count FROM file_imports WHERE source_file = ? OR source_file LIKE ?",
+            [projectPath, `${projectPath}/%`]
+          )
+        : readCount(db, "SELECT COUNT(*) AS count FROM file_imports")
       : 0,
     watchedProjects: readWatchedProjectCount(db)
   })) ?? { importRelationships: 0, watchedProjects: 0 };
@@ -208,6 +232,11 @@ function tableExists(db: Database, tableName: string): boolean {
 
 function readCount(db: Database, sql: string): number {
   const row = db.prepare(sql).get() as NumberRow | undefined;
+  return readNumber(row, "count");
+}
+
+function readParameterizedCount(db: Database, sql: string, values: string[]): number {
+  const row = db.prepare(sql).get(...values) as NumberRow | undefined;
   return readNumber(row, "count");
 }
 

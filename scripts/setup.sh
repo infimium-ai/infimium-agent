@@ -19,7 +19,7 @@ fi
 docker compose up -d chromadb
 
 for i in {1..30}; do
-  if curl -fsS http://localhost:8000/api/v1/heartbeat >/dev/null 2>&1; then
+  if curl -fsS http://localhost:8000/api/v2/heartbeat >/dev/null 2>&1 || curl -fsS http://localhost:8000/api/v1/heartbeat >/dev/null 2>&1; then
     break
   fi
 
