@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Added `infimium.workspace.json` for grouping related repositories.
+- Added multi-root indexing and a SQLite workspace relationship graph.
+- Added cross-project `get_context` summaries without sharing task memory or Git state.
+- Added workspace-aware Dart package import resolution across Flutter repositories.
+- Added `infimium workspace init`, `show`, `validate`, and `graph` commands.
+- Hardened concurrent context reads across agents with bounded SQLite lock waiting.
+
 ## 0.2.1
 
 - Fixed `expand_symbol` on fresh installations before the first index.

@@ -18,6 +18,7 @@ import {
   createProjectFilePolicy,
   filterProjectFiles
 } from "./project-files.js";
+import { loadWorkspaceForProject } from "../workspace/workspace.js";
 
 const CODE_COLLECTION_NAME = "infimium_code";
 export const DEP_GRAPH_DB_PATH = dataPath("infimium.db");
@@ -65,7 +66,7 @@ export class DepGraphBuilder {
   async buildGraph(dirPath: string): Promise<void> {
     const rootPath = resolve(dirPath);
     const files = await findCodeFiles(rootPath);
-    const dartPackageName = readDartPackageName(rootPath);
+    const dartPackageRoots = readDartPackageRoots(rootPath);
 
     this.initializeDb();
     this.clearGraphForRoot(rootPath);
@@ -76,7 +77,7 @@ export class DepGraphBuilder {
       }
 
       const imports = extractImports(sourceFile)
-        .map((importPath) => resolveImport(sourceFile, importPath, rootPath, dartPackageName))
+        .map((importPath) => resolveImport(sourceFile, importPath, dartPackageRoots))
         .filter((importedFile): importedFile is string => importedFile !== null);
 
       for (const importedFile of new Set(imports)) {
@@ -104,7 +105,7 @@ export class DepGraphBuilder {
       if (
         typeof row.source_file === "string" &&
         typeof row.imported_file === "string" &&
-        (isWithinRoot(row.source_file, rootPath) || isWithinRoot(row.imported_file, rootPath))
+        isWithinRoot(row.source_file, rootPath)
       ) {
         deleteImport.run(row.source_file, row.imported_file);
       }
@@ -398,15 +399,22 @@ function readName(node: SyntaxNode | null): string | null {
 function resolveImport(
   sourceFile: string,
   importPath: string,
-  rootPath: string,
-  dartPackageName: string | null
+  dartPackageRoots: Map<string, string>
 ): string | null {
-  if (importPath.startsWith("package:") && dartPackageName) {
-    const packagePrefix = `package:${dartPackageName}/`;
-    if (!importPath.startsWith(packagePrefix)) {
+  if (importPath.startsWith("package:")) {
+    const packageImport = importPath.slice("package:".length);
+    const separatorIndex = packageImport.indexOf("/");
+    if (separatorIndex <= 0) {
       return null;
     }
-    return resolveExistingImport(resolve(rootPath, "lib", importPath.slice(packagePrefix.length)));
+    const packageName = packageImport.slice(0, separatorIndex);
+    const packageRoot = dartPackageRoots.get(packageName);
+    if (!packageRoot) {
+      return null;
+    }
+    return resolveExistingImport(
+      resolve(packageRoot, "lib", packageImport.slice(separatorIndex + 1))
+    );
   }
 
   if (!importPath.startsWith(".")) {
@@ -441,6 +449,19 @@ function unique(values: string[]): string[] {
 
 function unquote(value: string): string {
   return value.replace(/^r?["']|["']$/g, "");
+}
+
+function readDartPackageRoots(rootPath: string): Map<string, string> {
+  const workspace = loadWorkspaceForProject(rootPath);
+  const projectPaths = workspace?.projects.map((project) => project.path) ?? [rootPath];
+  const packageRoots = new Map<string, string>();
+  for (const projectPath of projectPaths) {
+    const packageName = readDartPackageName(projectPath);
+    if (packageName) {
+      packageRoots.set(packageName, projectPath);
+    }
+  }
+  return packageRoots;
 }
 
 function readDartPackageName(rootPath: string): string | null {

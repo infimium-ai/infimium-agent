@@ -2,6 +2,11 @@ import { createRequire } from "node:module";
 import { relative, resolve } from "node:path";
 
 import { DEP_GRAPH_DB_PATH } from "../indexer/dep-graph.js";
+import {
+  findWorkspaceProject,
+  isPathWithin,
+  loadWorkspaceForProject
+} from "../workspace/workspace.js";
 
 const require = createRequire(import.meta.url);
 
@@ -29,10 +34,16 @@ export class DepGraphTool {
   private db: import("node:sqlite").DatabaseSync | null = null;
   private readonly sqlitePath: string;
   private readonly codebasePath: string | null;
+  private readonly projectPaths: string[];
 
   constructor(options: DepGraphToolOptions = {}) {
     this.sqlitePath = options.sqlitePath ?? DEP_GRAPH_DB_PATH;
-    this.codebasePath = options.codebasePath ?? null;
+    this.codebasePath = options.codebasePath ? resolve(options.codebasePath) : null;
+    const workspace = this.codebasePath
+      ? loadWorkspaceForProject(this.codebasePath)
+      : null;
+    this.projectPaths = workspace?.projects.map((project) => project.path) ??
+      (this.codebasePath ? [this.codebasePath] : []);
   }
 
   query(symbolName: string): DepGraphResult {
@@ -62,26 +73,25 @@ export class DepGraphTool {
   }
 
   private findSymbolFile(symbolName: string): string | null {
-    const row = this.codebasePath
-      ? this.getDb()
-          .prepare(
-            `SELECT file_path FROM symbol_locations
-             WHERE symbol_name = ? AND (file_path = ? OR file_path LIKE ?)
-             ORDER BY line_start LIMIT 1`
-          )
-          .get(
-            symbolName,
-            resolve(this.codebasePath),
-            `${resolve(this.codebasePath)}/%`
-          )
-      : this.getDb()
-          .prepare(
-            "SELECT file_path FROM symbol_locations WHERE symbol_name = ? ORDER BY line_start LIMIT 1"
-          )
-          .get(symbolName);
-    const parsedRow = parseSymbolLocationRow(row);
+    const rows = this.getDb()
+      .prepare(
+        "SELECT file_path FROM symbol_locations WHERE symbol_name = ? ORDER BY line_start"
+      )
+      .all(symbolName)
+      .map(parseSymbolLocationRow)
+      .filter((row): row is SymbolLocationRow => row !== null);
+    if (this.projectPaths.length === 0) {
+      return rows[0]?.file_path ?? null;
+    }
 
-    return parsedRow?.file_path ?? null;
+    const currentProjectMatch = this.codebasePath
+      ? rows.find((row) => isPathWithin(row.file_path, this.codebasePath!))
+      : null;
+    return currentProjectMatch?.file_path ??
+      rows.find((row) =>
+        this.projectPaths.some((projectPath) => isPathWithin(row.file_path, projectPath))
+      )?.file_path ??
+      null;
   }
 
   private findImportedBy(filePath: string): string[] {
@@ -175,8 +185,16 @@ function displayPath(filePath: string, codebasePath?: string | null): string {
   }
 
   const relativePath = relative(codebasePath, filePath);
+  if (relativePath && !relativePath.startsWith("..")) {
+    return relativePath;
+  }
 
-  return relativePath && !relativePath.startsWith("..") ? relativePath : filePath;
+  const workspace = loadWorkspaceForProject(codebasePath);
+  const project = workspace ? findWorkspaceProject(workspace, filePath) : null;
+  if (project) {
+    return `${project.id}:${relative(project.path, filePath)}`;
+  }
+  return filePath;
 }
 
 function normalizeSymbolName(symbolName: string): string {

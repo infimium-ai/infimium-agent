@@ -1,10 +1,10 @@
 # Infimium Roadmap
 
-## 0.3.0
+## Shipped
 
-- Add `infimium.workspace.json`.
-- Build a multi-root project graph.
-- Return cross-project context from `get_context` without mixing project state.
+- `infimium.workspace.json` workspace federation.
+- Multi-root indexing and project graph.
+- Cross-project context without mixing task memory or Git state.
 
 ## Later
 
