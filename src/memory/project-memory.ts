@@ -87,12 +87,15 @@ type ActiveProjectRow = {
 
 export class ProjectMemoryStore {
   private readonly db: Database;
+  private readonly dbPath: string;
 
   constructor(dbPath: string = dataPath("infimium.db")) {
     const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
     const resolvedDbPath = resolve(dbPath);
     mkdirSync(dirname(resolvedDbPath), { recursive: true });
+    this.dbPath = resolvedDbPath;
     this.db = new DatabaseSync(resolvedDbPath);
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.ensureSchema();
   }
 
@@ -207,6 +210,10 @@ export class ProjectMemoryStore {
     return rows
       .map((row) => readString(row.project_path))
       .filter((projectPath): projectPath is string => projectPath !== null);
+  }
+
+  getDatabasePath(): string {
+    return this.dbPath;
   }
 
   saveContextSnapshot(input: ProjectContextSnapshotRecord): void {

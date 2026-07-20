@@ -46,6 +46,7 @@ query: "price calculation logic"
 - Auto-index while the MCP server runs.
 - Project memory across chats, agents, and IDEs.
 - Project-scoped YAML context with repo overview, task, Git state, and index health.
+- Workspace federation for related repositories without mixing their memory or Git state.
 - Setup checker with copy-paste fixes: `npx infimium doctor`.
 
 ## Quick Start
@@ -127,6 +128,7 @@ If the agent is in a different workspace than the MCP server, ask it to pass `pr
 npx infimium doctor
 npx infimium status
 npx infimium index
+npx infimium workspace show
 npx infimium watch
 npx infimium hello
 npx infimium search "latest MCP registry news"
@@ -141,6 +143,29 @@ npx infimium resume
 npx infimium get-context                    # YAML by default
 npx infimium get-context --format json      # optional compatibility output
 ```
+
+## Multiple Projects
+
+From the directory containing your related repositories:
+
+```bash
+npx infimium workspace init ./UserApp ./BrandApp ./supabase --name "klubEATS"
+```
+
+Edit the generated `infimium.workspace.json` to describe relationships:
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "klubEATS",
+  "projects": [
+    { "id": "userapp", "path": "./UserApp", "role": "client", "dependsOn": ["supabase"] },
+    { "id": "supabase", "path": "./supabase", "role": "backend", "dependsOn": [] }
+  ]
+}
+```
+
+Run `npx infimium index`. `get_context` then returns full context for the current project plus compressed summaries and graph edges for related projects.
 
 Check health:
 
@@ -214,7 +239,7 @@ Infimium indexes your repo into:
 - ChromaDB: local vector search over docs and code symbols.
 - `context/<projectId>/layer.md`: compact YAML handoff for the active project.
 
-The context includes a centralized repo overview, current task, recent memory, project-only index health, and a capped summary of relevant Git activity. When `infimium serve` is running, it refreshes every 5 minutes and auto-indexes changed files. A fresh agent should call `get_context` first, use `semantic_code_search` for signatures, and call `expand_symbol` only when full code is required.
+The context includes a centralized repo overview, current task, recent memory, project-only index health, and a capped summary of relevant Git activity. In a workspace, related projects contribute only compressed summaries and graph edges, so tasks and working trees never overlap. When `infimium serve` is running, it refreshes every 5 minutes and auto-indexes changed files. A fresh agent should call `get_context` first, use `semantic_code_search` for signatures, and call `expand_symbol` only when full code is required.
 
 ## Privacy
 
