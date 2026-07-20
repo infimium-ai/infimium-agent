@@ -55,13 +55,19 @@ describe("CodeSearchTool", () => {
     );
 
     expect(output).toBe(
-      "[1] calcPropertyValue() — services/property/calc.ts:142-189 (score: 0.94)\nfunction calcPropertyValue() {\n  return 42;\n}"
+      "[1] calcPropertyValue() — services/property/calc.ts:142-189 (score: 0.94)\nfunction calcPropertyValue()"
     );
+    expect(output).not.toContain("return 42");
     expect(collection.query).toHaveBeenCalledWith({
       queryEmbeddings: [[0.1, 0.2, 0.3]],
       nResults: 3,
       include: ["documents", "metadatas", "distances"],
-      where: { language: { $eq: "typescript" } }
+      where: {
+        $and: [
+          { projectPath: { $eq: "/code" } },
+          { language: { $eq: "typescript" } }
+        ]
+      }
     });
   });
 

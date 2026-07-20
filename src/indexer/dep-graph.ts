@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, extname, resolve } from "node:path";
+import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
 import { ChromaClient } from "chromadb";
 import { glob } from "glob";
@@ -8,10 +8,16 @@ import Parser, { type Language, type SyntaxNode } from "tree-sitter";
 import JavaScript from "tree-sitter-javascript";
 import Python from "tree-sitter-python";
 import TypeScriptGrammars from "tree-sitter-typescript";
+import DartParser, { type SyntaxNode as DartSyntaxNode } from "@sengac/tree-sitter";
+import Dart from "@sengac/tree-sitter-dart";
 
 import { createChromaClient } from "../chroma.js";
 import { dataPath } from "../paths.js";
 import { CodeParser } from "./code-parser.js";
+import {
+  createProjectFilePolicy,
+  filterProjectFiles
+} from "./project-files.js";
 
 const CODE_COLLECTION_NAME = "infimium_code";
 export const DEP_GRAPH_DB_PATH = dataPath("infimium.db");
@@ -20,10 +26,11 @@ const { tsx, typescript } = TypeScriptGrammars;
 const JS_EXTENSIONS = new Set([".js", ".jsx", ".mjs"]);
 const TS_EXTENSIONS = new Set([".ts", ".tsx"]);
 const PY_EXTENSIONS = new Set([".py"]);
-const RESOLVE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py"];
-const INDEX_FILES = ["index.ts", "index.tsx", "index.js", "index.jsx", "__init__.py"];
+const DART_EXTENSIONS = new Set([".dart"]);
+const RESOLVE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py", ".dart"];
+const INDEX_FILES = ["index.ts", "index.tsx", "index.js", "index.jsx", "__init__.py", "index.dart"];
 
-type CodeLanguage = "javascript" | "typescript" | "python";
+type CodeLanguage = "javascript" | "typescript" | "python" | "dart";
 
 type CodeMetadata = {
   name?: unknown;
@@ -58,9 +65,10 @@ export class DepGraphBuilder {
   async buildGraph(dirPath: string): Promise<void> {
     const rootPath = resolve(dirPath);
     const files = await findCodeFiles(rootPath);
+    const dartPackageName = readDartPackageName(rootPath);
 
     this.initializeDb();
-    this.clearGraphTables();
+    this.clearGraphForRoot(rootPath);
 
     for (const sourceFile of files) {
       for (const symbol of this.codeParser.parseFile(sourceFile)) {
@@ -68,7 +76,7 @@ export class DepGraphBuilder {
       }
 
       const imports = extractImports(sourceFile)
-        .map((importPath) => resolveImport(sourceFile, importPath))
+        .map((importPath) => resolveImport(sourceFile, importPath, rootPath, dartPackageName))
         .filter((importedFile): importedFile is string => importedFile !== null);
 
       for (const importedFile of new Set(imports)) {
@@ -76,7 +84,7 @@ export class DepGraphBuilder {
       }
     }
 
-    await this.populateSymbolLocations();
+    await this.populateSymbolLocations(rootPath);
   }
 
   close(): void {
@@ -84,10 +92,39 @@ export class DepGraphBuilder {
     this.db = null;
   }
 
-  private clearGraphTables(): void {
+  private clearGraphForRoot(rootPath: string): void {
     const db = this.getDb();
-    db.exec("DELETE FROM file_imports");
-    db.exec("DELETE FROM symbol_locations");
+    const imports = db
+      .prepare("SELECT source_file, imported_file FROM file_imports")
+      .all() as Array<{ source_file?: unknown; imported_file?: unknown }>;
+    const deleteImport = db.prepare(
+      "DELETE FROM file_imports WHERE source_file = ? AND imported_file = ?"
+    );
+    for (const row of imports) {
+      if (
+        typeof row.source_file === "string" &&
+        typeof row.imported_file === "string" &&
+        (isWithinRoot(row.source_file, rootPath) || isWithinRoot(row.imported_file, rootPath))
+      ) {
+        deleteImport.run(row.source_file, row.imported_file);
+      }
+    }
+
+    const symbols = db
+      .prepare("SELECT symbol_name, file_path FROM symbol_locations")
+      .all() as Array<{ symbol_name?: unknown; file_path?: unknown }>;
+    const deleteSymbol = db.prepare(
+      "DELETE FROM symbol_locations WHERE symbol_name = ? AND file_path = ?"
+    );
+    for (const row of symbols) {
+      if (
+        typeof row.symbol_name === "string" &&
+        typeof row.file_path === "string" &&
+        isWithinRoot(row.file_path, rootPath)
+      ) {
+        deleteSymbol.run(row.symbol_name, row.file_path);
+      }
+    }
   }
 
   private insertFileImport(sourceFile: string, importedFile: string): void {
@@ -114,7 +151,7 @@ export class DepGraphBuilder {
       .run(symbolName, filePath, lineStart);
   }
 
-  private async populateSymbolLocations(): Promise<void> {
+  private async populateSymbolLocations(rootPath: string): Promise<void> {
     const collection = await this.chromaClient.getOrCreateCollection({
       name: CODE_COLLECTION_NAME,
       embeddingFunction: null
@@ -130,7 +167,8 @@ export class DepGraphBuilder {
       if (
         typeof name === "string" &&
         typeof filePath === "string" &&
-        typeof lineStart === "number"
+        typeof lineStart === "number" &&
+        isWithinRoot(filePath, rootPath)
       ) {
         this.insertSymbolLocation(name, filePath, lineStart);
       }
@@ -166,20 +204,19 @@ export class DepGraphBuilder {
 }
 
 async function findCodeFiles(rootPath: string): Promise<string[]> {
-  const matches = await glob("**/*.{ts,tsx,js,jsx,py}", {
+  const policy = await createProjectFilePolicy(rootPath);
+  const matches = await glob("**/*.{ts,tsx,js,jsx,py,dart}", {
     cwd: rootPath,
     absolute: true,
     nodir: true,
     ignore: [
-      "**/node_modules/**",
-      "**/.git/**",
-      "**/dist/**",
+      ...policy.globIgnorePatterns,
       "**/*.test.ts",
       "**/*.spec.ts"
     ]
   });
 
-  return matches.sort((a, b) => a.localeCompare(b));
+  return filterProjectFiles(matches, policy);
 }
 
 function extractImports(filePath: string): string[] {
@@ -189,6 +226,10 @@ function extractImports(filePath: string): string[] {
   }
 
   try {
+    if (language === "dart") {
+      return extractDartImports(filePath);
+    }
+
     const source = readFileSync(filePath, "utf8");
     const parser = new Parser();
     parser.setLanguage(loadLanguage(filePath, language));
@@ -221,6 +262,10 @@ function detectLanguage(filePath: string): CodeLanguage | null {
     return "python";
   }
 
+  if (DART_EXTENSIONS.has(extension)) {
+    return "dart";
+  }
+
   return null;
 }
 
@@ -231,6 +276,10 @@ function loadLanguage(filePath: string, language: CodeLanguage): Language {
 
   if (language === "python") {
     return Python;
+  }
+
+  if (language === "dart") {
+    throw new Error("Dart uses the dedicated modern Tree-sitter runtime");
   }
 
   return extname(filePath).toLowerCase() === ".tsx" ? tsx : typescript;
@@ -260,6 +309,47 @@ function collectImports(rootNode: SyntaxNode, language: CodeLanguage): string[] 
   visit(rootNode);
 
   return imports;
+}
+
+function extractDartImports(filePath: string): string[] {
+  const source = readFileSync(filePath, "utf8");
+  const parser = new DartParser();
+  parser.setLanguage(Dart);
+  const tree = parser.parse(source);
+  if (tree.rootNode.hasError) {
+    return [];
+  }
+
+  const imports: string[] = [];
+  function visit(node: DartSyntaxNode): void {
+    if (node.type === "library_import" || node.type === "library_export") {
+      const uri = findDartStringLiteral(node);
+      if (uri) {
+        imports.push(unquote(uri));
+      }
+      return;
+    }
+
+    for (const child of node.namedChildren) {
+      visit(child);
+    }
+  }
+
+  visit(tree.rootNode);
+  return imports;
+}
+
+function findDartStringLiteral(node: DartSyntaxNode): string | null {
+  if (node.type === "string_literal") {
+    return node.text;
+  }
+  for (const child of node.namedChildren) {
+    const found = findDartStringLiteral(child);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
 }
 
 function jsTsImportFromNode(node: SyntaxNode): string | null {
@@ -305,15 +395,29 @@ function readName(node: SyntaxNode | null): string | null {
   return node?.text ?? null;
 }
 
-function resolveImport(sourceFile: string, importPath: string): string | null {
+function resolveImport(
+  sourceFile: string,
+  importPath: string,
+  rootPath: string,
+  dartPackageName: string | null
+): string | null {
+  if (importPath.startsWith("package:") && dartPackageName) {
+    const packagePrefix = `package:${dartPackageName}/`;
+    if (!importPath.startsWith(packagePrefix)) {
+      return null;
+    }
+    return resolveExistingImport(resolve(rootPath, "lib", importPath.slice(packagePrefix.length)));
+  }
+
   if (!importPath.startsWith(".")) {
     return null;
   }
 
-  const basePath = resolve(dirname(sourceFile), importPath);
-  const candidates = buildImportCandidates(basePath);
+  return resolveExistingImport(resolve(dirname(sourceFile), importPath));
+}
 
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+function resolveExistingImport(basePath: string): string | null {
+  return buildImportCandidates(basePath).find((candidate) => existsSync(candidate)) ?? null;
 }
 
 function buildImportCandidates(basePath: string): string[] {
@@ -336,5 +440,19 @@ function unique(values: string[]): string[] {
 }
 
 function unquote(value: string): string {
-  return value.replace(/^["']|["']$/g, "");
+  return value.replace(/^r?["']|["']$/g, "");
+}
+
+function readDartPackageName(rootPath: string): string | null {
+  const pubspecPath = resolve(rootPath, "pubspec.yaml");
+  if (!existsSync(pubspecPath)) {
+    return null;
+  }
+  const match = readFileSync(pubspecPath, "utf8").match(/^name:\s*([^\s#]+)/m);
+  return match?.[1] ?? null;
+}
+
+function isWithinRoot(filePath: string, rootPath: string): boolean {
+  const relativePath = relative(rootPath, filePath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }

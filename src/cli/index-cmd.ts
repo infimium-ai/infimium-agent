@@ -34,6 +34,7 @@ export async function runIndexForPaths(config: Config, paths: IndexPaths): Promi
   let codeSymbols = 0;
   let codeFiles = 0;
   let codeSkipped = 0;
+  let filesPruned = 0;
 
   if (paths.localDocsPath) {
     const docIndexer = new DocIndexer(config);
@@ -48,6 +49,7 @@ export async function runIndexForPaths(config: Config, paths: IndexPaths): Promi
       );
 
       docsFiles = docStats.filesIndexed + docStats.filesSkipped;
+      filesPruned += docStats.filesPruned;
     } finally {
       docIndexer.close();
     }
@@ -60,6 +62,7 @@ export async function runIndexForPaths(config: Config, paths: IndexPaths): Promi
       codeSymbols = codeStats.symbolsIndexed;
       codeFiles = codeStats.filesProcessed;
       codeSkipped = codeStats.filesSkipped;
+      filesPruned += codeStats.filesPruned;
     } finally {
       codeIndexer.close();
     }
@@ -73,11 +76,15 @@ export async function runIndexForPaths(config: Config, paths: IndexPaths): Promi
       eventType: "index",
       summary:
         `Index ran for ${docsFiles} doc files; ` +
-        `code processed ${codeFiles} files, skipped ${codeSkipped}, indexed ${codeSymbols} symbols`
+        `code processed ${codeFiles} files, skipped ${codeSkipped}, indexed ${codeSymbols} symbols; ` +
+        `pruned ${filesPruned} stale files`
     });
   } finally {
     memory.close();
   }
 
   console.log(`Docs: ${docsFiles} files. Code: ${codeSymbols} symbols across ${codeFiles} files.`);
+  if (filesPruned > 0) {
+    console.log(`Pruned ${filesPruned} deleted or excluded files from the index.`);
+  }
 }

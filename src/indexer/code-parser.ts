@@ -5,8 +5,10 @@ import Parser, { type Language, type SyntaxNode } from "tree-sitter";
 import JavaScript from "tree-sitter-javascript";
 import Python from "tree-sitter-python";
 import TypeScriptGrammars from "tree-sitter-typescript";
+import DartParser, { type SyntaxNode as DartSyntaxNode } from "@sengac/tree-sitter";
+import Dart from "@sengac/tree-sitter-dart";
 
-export type CodeLanguage = "javascript" | "typescript" | "python";
+export type CodeLanguage = "javascript" | "typescript" | "python" | "dart";
 
 export type CodeSymbol = {
   name: string;
@@ -16,6 +18,7 @@ export type CodeSymbol = {
   lineEnd: number;
   language: CodeLanguage;
   bodyText: string;
+  signatureText: string;
 };
 
 type SymbolType = CodeSymbol["type"];
@@ -23,6 +26,7 @@ type SymbolType = CodeSymbol["type"];
 const JS_EXTENSIONS = new Set([".js", ".jsx", ".mjs"]);
 const TS_EXTENSIONS = new Set([".ts", ".tsx"]);
 const PY_EXTENSIONS = new Set([".py"]);
+const DART_EXTENSIONS = new Set([".dart"]);
 const { tsx, typescript } = TypeScriptGrammars;
 
 export class CodeParser {
@@ -34,6 +38,10 @@ export class CodeParser {
 
     try {
       const source = readFileSync(filePath, "utf8");
+      if (language === "dart") {
+        return parseDartSymbols(source, filePath);
+      }
+
       const parser = new Parser();
       parser.setLanguage(loadLanguage(filePath, language));
 
@@ -66,6 +74,10 @@ function detectLanguage(filePath: string): CodeLanguage | null {
     return "python";
   }
 
+  if (DART_EXTENSIONS.has(extension)) {
+    return "dart";
+  }
+
   return null;
 }
 
@@ -76,6 +88,10 @@ function loadLanguage(filePath: string, language: CodeLanguage): Language {
 
   if (language === "python") {
     return Python;
+  }
+
+  if (language === "dart") {
+    throw new Error("Dart uses the dedicated modern Tree-sitter runtime");
   }
 
   return extname(filePath).toLowerCase() === ".tsx" ? tsx : typescript;
@@ -232,8 +248,152 @@ function createSymbol(
     lineStart: node.startPosition.row + 1,
     lineEnd: node.endPosition.row + 1,
     language,
-    bodyText: source.slice(node.startIndex, node.endIndex)
+    bodyText: source.slice(node.startIndex, node.endIndex),
+    signatureText: readSignatureText(node, source)
   };
+}
+
+function readSignatureText(node: SyntaxNode, source: string): string {
+  const bodyNode =
+    node.childForFieldName("body") ??
+    node.namedChildren.find((child) => child.type === "statement_block" || child.type === "block");
+  const endIndex = bodyNode?.startIndex ?? node.endIndex;
+  return compactSignature(source.slice(node.startIndex, endIndex));
+}
+
+function parseDartSymbols(source: string, filePath: string): CodeSymbol[] {
+  const parser = new DartParser();
+  parser.setLanguage(Dart);
+  const tree = parser.parse(source);
+  if (tree.rootNode.hasError) {
+    return [];
+  }
+
+  const symbols: CodeSymbol[] = [];
+
+  function visit(node: DartSyntaxNode): void {
+    if (node.type === "class_definition") {
+      const nameNode = node.childForFieldName("name");
+      if (nameNode) {
+        symbols.push(createDartSymbol(node, nameNode.text, "class", source, filePath));
+      }
+    } else if (node.type === "method_signature") {
+      const name = readDartCallableName(node);
+      if (name) {
+        symbols.push(
+          createDartSymbol(
+            extendThroughDartBody(node),
+            name,
+            "method",
+            source,
+            filePath,
+            node
+          )
+        );
+      }
+    } else if (
+      (node.type === "constructor_signature" ||
+        node.type === "constant_constructor_signature") &&
+      node.parent?.type !== "method_signature"
+    ) {
+      const name = readDartCallableName(node);
+      if (name) {
+        symbols.push(createDartSymbol(node, name, "method", source, filePath));
+      }
+    } else if (
+      node.type === "function_signature" &&
+      node.parent?.type !== "method_signature"
+    ) {
+      const nameNode = node.childForFieldName("name");
+      if (nameNode) {
+        symbols.push(
+          createDartSymbol(
+            extendThroughDartBody(node),
+            nameNode.text,
+            isInsideDartClass(node) ? "method" : "function",
+            source,
+            filePath,
+            node
+          )
+        );
+      }
+    }
+
+    for (const child of node.namedChildren) {
+      visit(child);
+    }
+  }
+
+  visit(tree.rootNode);
+  return symbols;
+}
+
+function createDartSymbol(
+  bodyNode: DartSyntaxNode,
+  name: string,
+  type: SymbolType,
+  source: string,
+  filePath: string,
+  signatureNode: DartSyntaxNode = bodyNode
+): CodeSymbol {
+  const dartClassBody = signatureNode.namedChildren.find(
+    (child) => child.type === "class_body"
+  );
+  const signatureEnd = dartClassBody?.startIndex ?? signatureNode.endIndex;
+
+  return {
+    name,
+    type,
+    filePath,
+    lineStart: signatureNode.startPosition.row + 1,
+    lineEnd: bodyNode.endPosition.row + 1,
+    language: "dart",
+    bodyText: source.slice(signatureNode.startIndex, bodyNode.endIndex),
+    signatureText: compactSignature(
+      source.slice(signatureNode.startIndex, signatureEnd)
+    )
+  };
+}
+
+function extendThroughDartBody(node: DartSyntaxNode): DartSyntaxNode {
+  const sibling = node.nextNamedSibling;
+  return sibling?.type === "function_body" ? sibling : node;
+}
+
+function readDartCallableName(node: DartSyntaxNode): string | null {
+  const queue = [...node.namedChildren];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+
+    const nameNode = current.childForFieldName("name");
+    if (nameNode) {
+      return nameNode.text;
+    }
+    if (current.type === "identifier") {
+      return current.text;
+    }
+    queue.push(...current.namedChildren);
+  }
+
+  return null;
+}
+
+function isInsideDartClass(node: DartSyntaxNode): boolean {
+  let current = node.parent;
+  while (current) {
+    if (current.type === "class_definition") {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function compactSignature(value: string): string {
+  return value.replace(/\s+/g, " ").trim().replace(/\s*\{$/, "");
 }
 
 function readName(node: SyntaxNode): string | null {

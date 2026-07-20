@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { relative } from "node:path";
+import { relative, resolve } from "node:path";
 
 import { DEP_GRAPH_DB_PATH } from "../indexer/dep-graph.js";
 
@@ -62,9 +62,23 @@ export class DepGraphTool {
   }
 
   private findSymbolFile(symbolName: string): string | null {
-    const row = this.getDb()
-      .prepare("SELECT file_path FROM symbol_locations WHERE symbol_name = ? ORDER BY line_start LIMIT 1")
-      .get(symbolName);
+    const row = this.codebasePath
+      ? this.getDb()
+          .prepare(
+            `SELECT file_path FROM symbol_locations
+             WHERE symbol_name = ? AND (file_path = ? OR file_path LIKE ?)
+             ORDER BY line_start LIMIT 1`
+          )
+          .get(
+            symbolName,
+            resolve(this.codebasePath),
+            `${resolve(this.codebasePath)}/%`
+          )
+      : this.getDb()
+          .prepare(
+            "SELECT file_path FROM symbol_locations WHERE symbol_name = ? ORDER BY line_start LIMIT 1"
+          )
+          .get(symbolName);
     const parsedRow = parseSymbolLocationRow(row);
 
     return parsedRow?.file_path ?? null;

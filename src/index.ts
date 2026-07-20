@@ -9,6 +9,7 @@ import { runDepGraphCommand } from "./commands/dep-graph.js";
 import { runDoctorCommand } from "./commands/doctor.js";
 import { runDocsSearchCommand } from "./commands/docs-search.js";
 import { runFetchCommand } from "./commands/fetch.js";
+import { runExpandSymbolCommand } from "./commands/expand-symbol.js";
 import {
   runGetContextCommand,
   runMemoryCommand,
@@ -64,6 +65,11 @@ async function main(): Promise<void> {
     command === "semantic_code_search"
   ) {
     await runCodeSearchCommand(args);
+    return;
+  }
+
+  if (command === "expand-symbol" || command === "expand_symbol") {
+    await runExpandSymbolCommand(args);
     return;
   }
 

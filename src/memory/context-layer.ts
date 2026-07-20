@@ -4,23 +4,33 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 
 import { glob } from "glob";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { readInfimiumStatus } from "../cli/status-cmd.js";
+import { createProjectFilePolicy } from "../indexer/project-files.js";
 import { dataPath } from "../paths.js";
 import {
   ProjectMemoryStore,
   type ProjectMemoryEvent,
   type ProjectState
 } from "./project-memory.js";
+import {
+  createProjectId,
+  readProjectOverview,
+  type ProjectOverview
+} from "./project-overview.js";
 
 const DEFAULT_CONTEXT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_CONTEXT_LIMIT = 8;
-const DEFAULT_RECENT_FILE_LIMIT = 25;
+const DEFAULT_RECENT_FILE_LIMIT = 10;
+const DEFAULT_CHANGED_FILE_LIMIT = 10;
+
+export type ContextOutputFormat = "yaml" | "json";
 
 export type ContextLayerSnapshot = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatedAt: string;
-  projectPath: string;
+  project: ProjectOverview;
   contextFilePath: string;
   currentTask: string | null;
   lastNote: string | null;
@@ -43,16 +53,24 @@ export type ContextLayerSnapshot = {
   workingTree: {
     isGitRepo: boolean;
     dirty: boolean;
+    totalChangedFiles: number;
+    omittedFiles: number;
+    summary: string;
     changedFiles: Array<{
       path: string;
       status: string;
     }>;
   };
-  recentlyTouchedFiles: Array<{
-    path: string;
-    modifiedAt: string;
+  recentActivity: {
     withinWindow: boolean;
-  }>;
+    totalFiles: number;
+    omittedFiles: number;
+    summary: string;
+    files: Array<{
+      path: string;
+      modifiedAt: string;
+    }>;
+  };
   agentHandoff: {
     instruction: string;
     preferredTools: string[];
@@ -87,10 +105,11 @@ export class ContextLayerWriter {
 
   constructor(options: ContextLayerOptions = {}) {
     this.projectPath = resolve(options.projectPath ?? process.cwd());
+    const projectId = createProjectId(this.projectPath);
     this.filePath = resolve(
       options.filePath ??
-        process.env.INFIMIUM_CONTEXT_FILE?.trim() ??
-        dataPath("context/layer.md")
+        (process.env.INFIMIUM_CONTEXT_FILE?.trim() || undefined) ??
+        dataPath(`context/${projectId}/layer.md`)
     );
     this.limit = options.limit ?? DEFAULT_CONTEXT_LIMIT;
     this.recentFileLimit = options.recentFileLimit ?? DEFAULT_RECENT_FILE_LIMIT;
@@ -102,33 +121,46 @@ export class ContextLayerWriter {
 
   async refresh(): Promise<ContextLayerSnapshot> {
     const snapshot = await this.buildSnapshot();
-    const snapshotJson = JSON.stringify(snapshot, null, 2);
+    const snapshotText = serializeSnapshot(snapshot, "yaml");
 
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, `${snapshotJson}\n`, "utf8");
+    await writeFile(this.filePath, snapshotText, "utf8");
 
     this.memoryStore.saveContextSnapshot({
       projectPath: this.projectPath,
       filePath: this.filePath,
-      snapshotJson,
+      snapshotText,
+      format: "yaml",
       updatedAt: Date.now(),
       activateProject: this.activateProject
+    });
+    this.memoryStore.saveProjectOverview({
+      projectId: snapshot.project.projectId,
+      projectPath: this.projectPath,
+      overviewJson: JSON.stringify(snapshot.project),
+      updatedAt: Date.now()
     });
 
     return snapshot;
   }
 
-  async getContext(refresh: boolean = true): Promise<string> {
+  async getContext(
+    refresh: boolean = true,
+    format: ContextOutputFormat = "yaml"
+  ): Promise<string> {
     if (refresh) {
-      return `${JSON.stringify(await this.refresh(), null, 2)}\n`;
+      return serializeSnapshot(await this.refresh(), format);
     }
 
     const cached = this.memoryStore.getLatestContextSnapshot(this.projectPath);
     if (cached) {
-      return `${cached.snapshotJson}\n`;
+      const snapshot = parseCachedSnapshot(cached.snapshotText);
+      if (snapshot) {
+        return serializeSnapshot(snapshot, format);
+      }
     }
 
-    return `${JSON.stringify(await this.refresh(), null, 2)}\n`;
+    return serializeSnapshot(await this.refresh(), format);
   }
 
   close(): void {
@@ -146,16 +178,17 @@ export class ContextLayerWriter {
     const recentMemory = compactMemoryEvents(resumeContext.recentEvents);
     const lastNonIndexNote =
       recentMemory.find((event) => event.eventType !== "index")?.summary ?? null;
-    const [index, workingTree, recentlyTouchedFiles] = await Promise.all([
-      readIndexSummary(),
-      Promise.resolve(readGitWorkingTree(this.projectPath)),
+    const [project, index, workingTree, recentActivity] = await Promise.all([
+      readProjectOverview(this.projectPath),
+      readIndexSummary(this.projectPath),
+      readGitWorkingTree(this.projectPath),
       readRecentlyTouchedFiles(this.projectPath, now - this.activityWindowMs, this.recentFileLimit)
     ]);
 
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatedAt: new Date(now).toISOString(),
-      projectPath: this.projectPath,
+      project,
       contextFilePath: this.filePath,
       currentTask: resumeContext.state.currentTask,
       lastNote: lastNonIndexNote ?? resumeContext.state.lastNote,
@@ -165,7 +198,7 @@ export class ContextLayerWriter {
         .slice(0, this.limit)
         .map(formatMemoryEvent),
       workingTree,
-      recentlyTouchedFiles,
+      recentActivity,
       agentHandoff: {
         instruction:
           "Read this context first, then use semantic_code_search, dep_graph, query_local_docs, and project_memory before editing.",
@@ -219,10 +252,11 @@ export function startContextLayerAutoWriter(
 
 export async function readContextLayer(options: ContextLayerOptions & {
   refresh?: boolean;
+  format?: ContextOutputFormat;
 } = {}): Promise<string> {
   const writer = new ContextLayerWriter(options);
   try {
-    return await writer.getContext(options.refresh ?? true);
+    return await writer.getContext(options.refresh ?? true, options.format ?? "yaml");
   } finally {
     writer.close();
   }
@@ -244,8 +278,8 @@ function compactMemoryEvents(events: ProjectMemoryEvent[]): ProjectMemoryEvent[]
   return latestIndexEvent ? [...nonIndexEvents, latestIndexEvent] : nonIndexEvents;
 }
 
-async function readIndexSummary(): Promise<ContextLayerSnapshot["index"]> {
-  const status = await readInfimiumStatus().catch(() => null);
+async function readIndexSummary(projectPath: string): Promise<ContextLayerSnapshot["index"]> {
+  const status = await readInfimiumStatus({ projectPath }).catch(() => null);
   if (!status) {
     return null;
   }
@@ -263,8 +297,10 @@ async function readIndexSummary(): Promise<ContextLayerSnapshot["index"]> {
   };
 }
 
-function readGitWorkingTree(projectPath: string): ContextLayerSnapshot["workingTree"] {
-  const result = spawnSync("git", ["status", "--short"], {
+async function readGitWorkingTree(
+  projectPath: string
+): Promise<ContextLayerSnapshot["workingTree"]> {
+  const result = spawnSync("git", ["status", "--short", "--untracked-files=all"], {
     cwd: projectPath,
     encoding: "utf8",
     timeout: 2_000
@@ -274,23 +310,33 @@ function readGitWorkingTree(projectPath: string): ContextLayerSnapshot["workingT
     return {
       isGitRepo: false,
       dirty: false,
+      totalChangedFiles: 0,
+      omittedFiles: 0,
+      summary: "Not a Git repository.",
       changedFiles: []
     };
   }
 
-  const changedFiles = result.stdout
+  const policy = await createProjectFilePolicy(projectPath);
+  const allChangedFiles = result.stdout
     .split("\n")
     .map((line) => line.trimEnd())
     .filter(Boolean)
-    .slice(0, 50)
     .map((line) => ({
       status: line.slice(0, 2).trim() || "?",
       path: line.slice(3).trim()
-    }));
+    }))
+    .filter((file) => !policy.isIgnored(resolve(projectPath, normalizeGitPath(file.path))))
+    .sort(compareChangedFiles);
+  const changedFiles = allChangedFiles.slice(0, DEFAULT_CHANGED_FILE_LIMIT);
+  const omittedFiles = Math.max(0, allChangedFiles.length - changedFiles.length);
 
   return {
     isGitRepo: true,
-    dirty: changedFiles.length > 0,
+    dirty: allChangedFiles.length > 0,
+    totalChangedFiles: allChangedFiles.length,
+    omittedFiles,
+    summary: summarizePaths(allChangedFiles.map((file) => file.path), "changed"),
     changedFiles
   };
 }
@@ -299,21 +345,13 @@ async function readRecentlyTouchedFiles(
   projectPath: string,
   sinceMs: number,
   limit: number
-): Promise<ContextLayerSnapshot["recentlyTouchedFiles"]> {
+): Promise<ContextLayerSnapshot["recentActivity"]> {
+  const policy = await createProjectFilePolicy(projectPath);
   const paths = await glob("**/*", {
     cwd: projectPath,
     absolute: true,
     nodir: true,
-    ignore: [
-      "**/node_modules/**",
-      "**/.git/**",
-      "**/dist/**",
-      "**/chroma_db/**",
-      "**/*.db",
-      "**/.env",
-      "**/.env.*",
-      "**/context/layer.md"
-    ]
+    ignore: policy.globIgnorePatterns
   }).catch(() => []);
 
   const touched = await Promise.all(
@@ -333,20 +371,101 @@ async function readRecentlyTouchedFiles(
 
   const existingFiles = touched
     .filter((item): item is NonNullable<typeof item> => item !== null)
-    .sort((a, b) => b.modifiedMs - a.modifiedMs);
+    .filter((item) => !policy.isIgnored(resolve(projectPath, item.path)))
+    .sort(
+      (a, b) =>
+        pathPriority(a.path) - pathPriority(b.path) ||
+        b.modifiedMs - a.modifiedMs
+    );
   const withinWindow = existingFiles.filter((file) => file.modifiedMs >= sinceMs);
   const selectedFiles = withinWindow.length > 0 ? withinWindow : existingFiles;
-
-  return selectedFiles
+  const files = selectedFiles
     .slice(0, limit)
-    .map(({ path, modifiedAt, modifiedMs }) => ({
-      path,
-      modifiedAt,
-      withinWindow: modifiedMs >= sinceMs
-    }));
+    .map(({ path, modifiedAt }) => ({ path, modifiedAt }));
+
+  return {
+    withinWindow: withinWindow.length > 0,
+    totalFiles: selectedFiles.length,
+    omittedFiles: Math.max(0, selectedFiles.length - files.length),
+    summary:
+      withinWindow.length > 0
+        ? summarizePaths(selectedFiles.map((file) => file.path), "recently touched")
+        : `No files changed in the activity window; showing the latest ${files.length} relevant files.`,
+    files
+  };
 }
 
 function displayPath(filePath: string, projectPath: string): string {
   const relativePath = relative(projectPath, filePath);
   return relativePath && !relativePath.startsWith("..") ? relativePath : filePath;
+}
+
+function serializeSnapshot(
+  snapshot: ContextLayerSnapshot,
+  format: ContextOutputFormat
+): string {
+  if (format === "json") {
+    return `${JSON.stringify(snapshot, null, 2)}\n`;
+  }
+  return stringifyYaml(snapshot, {
+    lineWidth: 0,
+    indent: 2
+  });
+}
+
+function parseCachedSnapshot(value: string): ContextLayerSnapshot | null {
+  try {
+    const parsed = parseYaml(value) as unknown;
+    return isContextLayerSnapshot(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isContextLayerSnapshot(value: unknown): value is ContextLayerSnapshot {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "schemaVersion" in value &&
+    "project" in value
+  );
+}
+
+function normalizeGitPath(filePath: string): string {
+  const renameTarget = filePath.includes(" -> ")
+    ? filePath.slice(filePath.lastIndexOf(" -> ") + 4)
+    : filePath;
+  return renameTarget.replace(/^"|"$/g, "");
+}
+
+function compareChangedFiles(
+  left: { path: string; status: string },
+  right: { path: string; status: string }
+): number {
+  return pathPriority(left.path) - pathPriority(right.path) || left.path.localeCompare(right.path);
+}
+
+function pathPriority(filePath: string): number {
+  if (/^(src|lib|app|api|services|packages|supabase)\//.test(filePath)) return 0;
+  if (/\.(ts|tsx|js|jsx|py|dart)$/.test(filePath)) return 1;
+  if (/\.(md|json|ya?ml|toml)$/.test(filePath)) return 2;
+  return 3;
+}
+
+function summarizePaths(paths: string[], label: string): string {
+  if (paths.length === 0) {
+    return `No ${label} files.`;
+  }
+
+  const groups = new Map<string, number>();
+  for (const filePath of paths) {
+    const group = filePath.includes("/") ? filePath.split("/", 1)[0] : "root";
+    groups.set(group, (groups.get(group) ?? 0) + 1);
+  }
+  const mainGroups = [...groups.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([group, count]) => `${group} (${count})`)
+    .join(", ");
+  return `${paths.length} ${label} files; concentrated in ${mainGroups}.`;
 }

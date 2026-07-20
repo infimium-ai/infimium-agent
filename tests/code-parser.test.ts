@@ -41,6 +41,22 @@ describe("CodeParser", () => {
     expect(parser.parseFile(join(fixturesPath, "sample.json"))).toEqual([]);
   });
 
+  it("extracts Dart functions, classes, constructors, and methods", () => {
+    const symbols = parser.parseFile(join(fixturesPath, "sample.dart"));
+
+    expect(symbols.map((symbol) => symbol.name)).toEqual([
+      "bootstrap",
+      "NotificationService",
+      "NotificationService",
+      "initialize",
+      "dispose"
+    ]);
+    expect(symbols.every((symbol) => symbol.language === "dart")).toBe(true);
+    expect(symbols.find((symbol) => symbol.name === "initialize")?.signatureText).toContain(
+      "Future<void> initialize()"
+    );
+  });
+
   it("returns an empty list for malformed TypeScript", () => {
     expect(() => parser.parseFile(join(fixturesPath, "malformed.ts"))).not.toThrow();
     expect(parser.parseFile(join(fixturesPath, "malformed.ts"))).toEqual([]);

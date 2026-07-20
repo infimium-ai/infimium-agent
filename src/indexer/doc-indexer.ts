@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { basename, extname, relative, resolve } from "node:path";
+import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 
 import { load } from "cheerio";
 import { ChromaClient, type Collection, type Metadata } from "chromadb";
@@ -10,9 +10,14 @@ import { PDFParse } from "pdf-parse";
 import { createChromaClient } from "../chroma.js";
 import type { Config } from "../config.js";
 import { dataPath } from "../paths.js";
+import {
+  createProjectFilePolicy,
+  filterProjectFiles
+} from "./project-files.js";
 
 const COLLECTION_NAME = "infimium_docs";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
+const DOC_INDEX_SCHEMA_VERSION = 2;
 const CHUNK_SIZE_CHARS = 512 * 4;
 const CHUNK_OVERLAP_CHARS = 50 * 4;
 const SQLITE_DB_PATH = dataPath("infimium_docs.db");
@@ -22,6 +27,7 @@ type DocMetadata = Metadata & {
   filePath: string;
   chunkIndex: number;
   mtime: number;
+  projectPath: string;
 };
 
 type IndexedDocRow = {
@@ -29,6 +35,7 @@ type IndexedDocRow = {
   indexed_at: number;
   mtime: number;
   chunk_count: number;
+  index_version: number;
 };
 
 type StatsRow = {
@@ -46,6 +53,7 @@ export type IndexStats = {
   filesIndexed: number;
   chunksCreated: number;
   filesSkipped: number;
+  filesPruned: number;
 };
 
 export class DocIndexer {
@@ -74,10 +82,12 @@ export class DocIndexer {
     const stats: IndexStats = {
       filesIndexed: 0,
       chunksCreated: 0,
-      filesSkipped: 0
+      filesSkipped: 0,
+      filesPruned: 0
     };
 
     this.initializeDb();
+    stats.filesPruned = await this.pruneStaleFiles(collection, rootPath, filePaths);
 
     for (const [index, filePath] of filePaths.entries()) {
       onProgress?.({
@@ -86,7 +96,7 @@ export class DocIndexer {
         filePath
       });
 
-      const result = await this.indexFile(collection, filePath);
+      const result = await this.indexFile(collection, filePath, rootPath);
       if (result.skipped) {
         stats.filesSkipped += 1;
         continue;
@@ -110,7 +120,8 @@ export class DocIndexer {
     return {
       filesIndexed: stats.filesIndexed,
       chunksCreated: stats.chunksCreated,
-      filesSkipped: 0
+      filesSkipped: 0,
+      filesPruned: 0
     };
   }
 
@@ -127,26 +138,47 @@ export class DocIndexer {
   }
 
   private async findDocumentFiles(rootPath: string): Promise<string[]> {
+    const policy = await createProjectFilePolicy(rootPath);
     const matches = await glob("**/*.{md,txt,pdf,html}", {
       cwd: rootPath,
       absolute: true,
       nodir: true,
-      ignore: [
-        "**/node_modules/**",
-        "**/.git/**",
-        "**/dist/**",
-        "**/*.db"
-      ]
+      ignore: policy.globIgnorePatterns
     });
 
-    return matches
-      .filter((filePath) => SUPPORTED_EXTENSIONS.has(extname(filePath).toLowerCase()))
-      .sort((a, b) => a.localeCompare(b));
+    return filterProjectFiles(
+      matches.filter((filePath) => SUPPORTED_EXTENSIONS.has(extname(filePath).toLowerCase())),
+      policy
+    );
+  }
+
+  private async pruneStaleFiles(
+    collection: Collection,
+    rootPath: string,
+    currentFilePaths: string[]
+  ): Promise<number> {
+    const currentFiles = new Set(currentFilePaths);
+    const rows = this.getDb()
+      .prepare("SELECT file_path FROM indexed_docs")
+      .all() as Array<{ file_path?: unknown }>;
+    const staleFiles = rows
+      .map((row) => row.file_path)
+      .filter((filePath): filePath is string => typeof filePath === "string")
+      .filter((filePath) => isWithinRoot(filePath, rootPath))
+      .filter((filePath) => !currentFiles.has(filePath));
+
+    for (const filePath of staleFiles) {
+      await collection.delete({ where: { filePath } });
+      this.getDb().prepare("DELETE FROM indexed_docs WHERE file_path = ?").run(filePath);
+    }
+
+    return staleFiles.length;
   }
 
   private async indexFile(
     collection: Collection,
-    filePath: string
+    filePath: string,
+    projectPath: string
   ): Promise<{ skipped: boolean; chunksCreated: number }> {
     const fileStat = await stat(filePath);
     const mtime = Math.trunc(fileStat.mtimeMs);
@@ -160,7 +192,7 @@ export class DocIndexer {
     const text = await this.readDocument(filePath);
     const chunks = chunkText(text);
     if (chunks.length > 0) {
-      await this.storeChunks(collection, filePath, mtime, chunks);
+      await this.storeChunks(collection, filePath, projectPath, mtime, chunks);
     }
 
     this.upsertIndexedDoc(filePath, mtime, chunks.length);
@@ -170,26 +202,32 @@ export class DocIndexer {
 
   private isUnchanged(filePath: string, mtime: number): boolean {
     const row = this.getDb()
-      .prepare("SELECT file_path, indexed_at, mtime, chunk_count FROM indexed_docs WHERE file_path = ?")
+      .prepare(
+        "SELECT file_path, indexed_at, mtime, chunk_count, index_version FROM indexed_docs WHERE file_path = ?"
+      )
       .get(filePath);
     const indexedDoc = parseIndexedDocRow(row);
 
-    return indexedDoc?.mtime === mtime;
+    return (
+      indexedDoc?.mtime === mtime &&
+      indexedDoc.index_version === DOC_INDEX_SCHEMA_VERSION
+    );
   }
 
   private upsertIndexedDoc(filePath: string, mtime: number, chunkCount: number): void {
     this.getDb()
       .prepare(
         `INSERT OR REPLACE INTO indexed_docs
-          (file_path, indexed_at, mtime, chunk_count)
-         VALUES (?, ?, ?, ?)`
+          (file_path, indexed_at, mtime, chunk_count, index_version)
+         VALUES (?, ?, ?, ?, ?)`
       )
-      .run(filePath, Date.now(), mtime, chunkCount);
+      .run(filePath, Date.now(), mtime, chunkCount, DOC_INDEX_SCHEMA_VERSION);
   }
 
   private async storeChunks(
     collection: Collection,
     filePath: string,
+    projectPath: string,
     mtime: number,
     chunks: string[]
   ): Promise<void> {
@@ -202,7 +240,7 @@ export class DocIndexer {
       ids.push(`${filePath}::chunk::${chunkIndex}`);
       embeddings.push(await this.embedChunk(chunk));
       documents.push(chunk);
-      metadatas.push({ filePath, chunkIndex, mtime });
+      metadatas.push({ filePath, projectPath, chunkIndex, mtime });
     }
 
     await collection.upsert({
@@ -258,9 +296,18 @@ export class DocIndexer {
           file_path TEXT PRIMARY KEY,
           indexed_at INTEGER,
           mtime INTEGER,
-          chunk_count INTEGER
+          chunk_count INTEGER,
+          index_version INTEGER NOT NULL DEFAULT 1
         )
       `);
+      const columns = this.db.prepare("PRAGMA table_info(indexed_docs)").all() as Array<{
+        name?: unknown;
+      }>;
+      if (!columns.some((column) => column.name === "index_version")) {
+        this.db.exec(
+          "ALTER TABLE indexed_docs ADD COLUMN index_version INTEGER NOT NULL DEFAULT 1"
+        );
+      }
     }
 
     return this.db;
@@ -314,11 +361,13 @@ function parseIndexedDocRow(row: unknown): IndexedDocRow | null {
   const indexedAt = row.indexed_at;
   const mtime = row.mtime;
   const chunkCount = row.chunk_count;
+  const indexVersion = row.index_version;
   if (
     typeof filePath !== "string" ||
     typeof indexedAt !== "number" ||
     typeof mtime !== "number" ||
-    typeof chunkCount !== "number"
+    typeof chunkCount !== "number" ||
+    typeof indexVersion !== "number"
   ) {
     return null;
   }
@@ -327,7 +376,8 @@ function parseIndexedDocRow(row: unknown): IndexedDocRow | null {
     file_path: filePath,
     indexed_at: indexedAt,
     mtime,
-    chunk_count: chunkCount
+    chunk_count: chunkCount,
+    index_version: indexVersion
   };
 }
 
@@ -347,6 +397,11 @@ function parseStatsRow(row: unknown): StatsRow {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isWithinRoot(filePath: string, rootPath: string): boolean {
+  const relativePath = relative(rootPath, filePath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 export function displayPath(rootPath: string, filePath: string): string {

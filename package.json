@@ -1,6 +1,6 @@
 {
   "name": "infimium",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Private context layer MCP for AI agents.",
   "private": false,
   "mcpName": "io.github.aryankumar06/infimium",
@@ -23,6 +23,7 @@
     "server.json",
     "public/infimium-logo.png",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     ".env.example"
   ],
@@ -37,6 +38,7 @@
     "search": "tsx src/index.ts search",
     "fetch": "tsx src/index.ts fetch",
     "code-search": "tsx src/index.ts code-search",
+    "expand-symbol": "tsx src/index.ts expand-symbol",
     "docs-search": "tsx src/index.ts docs-search",
     "dep-graph": "tsx src/index.ts dep-graph",
     "get-context": "tsx src/index.ts get-context",
@@ -51,10 +53,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@sengac/tree-sitter": "^0.25.10",
+    "@sengac/tree-sitter-dart": "^1.1.6",
     "cheerio": "^1.0.0",
     "chromadb": "^3.5.0",
     "dotenv": "^16.4.5",
     "glob": "^13.0.6",
+    "ignore": "^7.0.6",
     "pdf-parse": "^2.4.5",
     "tree-sitter": "0.21.1",
     "tree-sitter-javascript": "0.21.4",
@@ -62,6 +67,7 @@
     "tree-sitter-typescript": "0.23.2",
     "tsx": "^4.19.2",
     "turndown": "^7.2.0",
+    "yaml": "^2.9.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

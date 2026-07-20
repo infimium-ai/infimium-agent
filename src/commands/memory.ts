@@ -1,4 +1,7 @@
-import { readContextLayer } from "../memory/context-layer.js";
+import {
+  readContextLayer,
+  type ContextOutputFormat
+} from "../memory/context-layer.js";
 import {
   ProjectMemoryStore,
   formatResumeContext,
@@ -17,6 +20,7 @@ type RememberArgs = {
 type GetContextArgs = {
   refresh: boolean;
   limit: number;
+  format: ContextOutputFormat;
   projectPath?: string;
 };
 
@@ -81,7 +85,8 @@ export async function runGetContextCommand(args: string[] = process.argv.slice(3
   const context = await readContextLayer({
     projectPath: resolveMemoryProjectPath(parsed.projectPath),
     limit: parsed.limit,
-    refresh: parsed.refresh
+    refresh: parsed.refresh,
+    format: parsed.format
   });
 
   console.log(context.trimEnd());
@@ -96,12 +101,14 @@ export async function runRefreshContextCommand(
 export async function runGetContextTool(args: {
   refresh?: boolean;
   limit?: number;
+  format?: ContextOutputFormat;
   project_path?: string;
 }): Promise<string> {
   return readContextLayer({
     projectPath: resolveMemoryProjectPath(args.project_path),
     limit: args.limit ?? 8,
-    refresh: args.refresh ?? true
+    refresh: args.refresh ?? true,
+    format: args.format ?? "yaml"
   });
 }
 
@@ -157,6 +164,7 @@ export function resolveMemoryProjectPath(explicitProjectPath?: string | null): s
 function parseGetContextArgs(args: string[]): GetContextArgs {
   let refresh = true;
   let limit = 8;
+  let format: ContextOutputFormat = "yaml";
   let projectPath: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -187,12 +195,23 @@ function parseGetContextArgs(args: string[]): GetContextArgs {
       continue;
     }
 
+    if (arg === "--format") {
+      const value = readFlagValue(args, index, "--format");
+      if (value !== "yaml" && value !== "json") {
+        throw new Error("--format must be yaml or json");
+      }
+      format = value;
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown get_context argument: ${arg}`);
   }
 
   return {
     refresh,
     limit,
+    format,
     projectPath
   };
 }

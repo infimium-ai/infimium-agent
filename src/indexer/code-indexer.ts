@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import { ChromaClient, type Metadata } from "chromadb";
 import { glob } from "glob";
@@ -11,9 +11,14 @@ import type { Config } from "../config.js";
 import { dataPath } from "../paths.js";
 import { CodeParser, type CodeSymbol } from "./code-parser.js";
 import { DepGraphBuilder, DEP_GRAPH_DB_PATH } from "./dep-graph.js";
+import {
+  createProjectFilePolicy,
+  filterProjectFiles
+} from "./project-files.js";
 
 const COLLECTION_NAME = "infimium_code";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
+const CODE_INDEX_SCHEMA_VERSION = "2";
 const SQLITE_DB_PATH = dataPath("infimium_code.db");
 const require = createRequire(import.meta.url);
 
@@ -21,6 +26,7 @@ export type CodeIndexStats = {
   filesProcessed: number;
   symbolsIndexed: number;
   filesSkipped: number;
+  filesPruned: number;
 };
 
 type CodeMetadata = Metadata & {
@@ -30,6 +36,8 @@ type CodeMetadata = Metadata & {
   lineStart: number;
   lineEnd: number;
   language: CodeSymbol["language"];
+  signature: string;
+  projectPath: string;
 };
 
 type IndexedCodeFileRow = {
@@ -86,13 +94,15 @@ export class CodeIndexer {
     const stats: CodeIndexStats = {
       filesProcessed: 0,
       symbolsIndexed: 0,
-      filesSkipped: 0
+      filesSkipped: 0,
+      filesPruned: 0
     };
 
     this.initializeDb();
+    stats.filesPruned = await this.pruneStaleFiles(collection, rootPath, filePaths);
 
     for (const filePath of filePaths) {
-      const result = await this.indexFile(collection, filePath);
+      const result = await this.indexFile(collection, filePath, rootPath);
       if (result.skipped) {
         stats.filesSkipped += 1;
         continue;
@@ -125,25 +135,50 @@ export class CodeIndexer {
   }
 
   private async findCodeFiles(rootPath: string): Promise<string[]> {
-    const matches = await glob("**/*.{ts,tsx,js,jsx,py}", {
+    const policy = await createProjectFilePolicy(rootPath);
+    const matches = await glob("**/*.{ts,tsx,js,jsx,py,dart}", {
       cwd: rootPath,
       absolute: true,
       nodir: true,
       ignore: [
-        "**/node_modules/**",
-        "**/.git/**",
-        "**/dist/**",
+        ...policy.globIgnorePatterns,
         "**/*.test.ts",
         "**/*.spec.ts"
       ]
     });
 
-    return matches.sort((a, b) => a.localeCompare(b));
+    return filterProjectFiles(matches, policy);
+  }
+
+  private async pruneStaleFiles(
+    collection: CollectionLike,
+    rootPath: string,
+    currentFilePaths: string[]
+  ): Promise<number> {
+    const currentFiles = new Set(currentFilePaths);
+    const rows = this.getDb()
+      .prepare("SELECT file_path FROM indexed_code_files")
+      .all() as Array<{ file_path?: unknown }>;
+    const staleFiles = rows
+      .map((row) => row.file_path)
+      .filter((filePath): filePath is string => typeof filePath === "string")
+      .filter((filePath) => isWithinRoot(filePath, rootPath))
+      .filter((filePath) => !currentFiles.has(filePath));
+
+    for (const filePath of staleFiles) {
+      await collection.delete({ where: { filePath } });
+      this.getDb()
+        .prepare("DELETE FROM indexed_code_files WHERE file_path = ?")
+        .run(filePath);
+    }
+
+    return staleFiles.length;
   }
 
   private async indexFile(
     collection: CollectionLike,
-    filePath: string
+    filePath: string,
+    projectPath: string
   ): Promise<{ skipped: boolean; symbolsIndexed: number }> {
     const content = await readFile(filePath, "utf8");
     const contentHash = hashContent(content);
@@ -156,7 +191,7 @@ export class CodeIndexer {
     await collection.delete({ where: { filePath } });
 
     if (symbols.length > 0) {
-      await this.storeSymbols(collection, symbols);
+      await this.storeSymbols(collection, symbols, projectPath);
     }
 
     this.upsertIndexedCodeFile(filePath, contentHash, symbols.length);
@@ -166,7 +201,8 @@ export class CodeIndexer {
 
   private async storeSymbols(
     collection: CollectionLike,
-    symbols: CodeSymbol[]
+    symbols: CodeSymbol[],
+    projectPath: string
   ): Promise<void> {
     const ids: string[] = [];
     const embeddings: number[][] = [];
@@ -183,7 +219,9 @@ export class CodeIndexer {
         filePath: symbol.filePath,
         lineStart: symbol.lineStart,
         lineEnd: symbol.lineEnd,
-        language: symbol.language
+        language: symbol.language,
+        signature: symbol.signatureText,
+        projectPath
       });
     }
 
@@ -196,12 +234,13 @@ export class CodeIndexer {
   }
 
   private async embedSymbol(bodyText: string): Promise<number[]> {
+    const promptText = bodyText.length > 4000 ? bodyText.slice(0, 4000) : bodyText;
     const response = await fetch(`${this.ollamaHost}/api/embeddings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: OLLAMA_EMBEDDING_MODEL,
-        prompt: bodyText
+        prompt: promptText
       })
     });
 
@@ -265,7 +304,9 @@ export class CodeIndexer {
 }
 
 function hashContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
+  return createHash("sha256")
+    .update(`${CODE_INDEX_SCHEMA_VERSION}\0${content}`)
+    .digest("hex");
 }
 
 function parseIndexedCodeFileRow(row: unknown): IndexedCodeFileRow | null {
@@ -296,4 +337,9 @@ function parseIndexedCodeFileRow(row: unknown): IndexedCodeFileRow | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isWithinRoot(filePath: string, rootPath: string): boolean {
+  const relativePath = relative(rootPath, filePath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
