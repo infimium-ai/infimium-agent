@@ -1,8 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const expectedToolNames = [
@@ -20,6 +21,7 @@ const expectedToolNames = [
 ] as const;
 
 const tmpDir = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+const serverDataDir = mkdtempSync(join(tmpDir, "infimium-server-test-"));
 const builtServerPath = "dist/src/index.js";
 const serverArgs = existsSync(builtServerPath)
   ? [builtServerPath, "serve"]
@@ -59,7 +61,7 @@ describe("Infimium MCP server", () => {
       stderr: "pipe",
       env: {
         ...(tmpDir ? { TMPDIR: tmpDir } : {}),
-        INFIMIUM_DATA_DIR: tmpDir,
+        INFIMIUM_DATA_DIR: serverDataDir,
         SEARCH_API_KEY: "test-key",
         SHELL_ALLOWLIST: "ls,sleep"
       }
@@ -70,6 +72,7 @@ describe("Infimium MCP server", () => {
 
   afterAll(async () => {
     await transport.close();
+    rmSync(serverDataDir, { recursive: true, force: true });
   });
 
   it("lists exactly the eleven Infimium tools", async () => {
