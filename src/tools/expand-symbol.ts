@@ -24,6 +24,10 @@ export function expandSymbol(options: ExpandSymbolOptions): string {
   const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
   const db = new DatabaseSync(sqlitePath, { readOnly: true });
   try {
+    if (!tableExists(db, "symbol_locations")) {
+      return `Symbol not found: ${options.symbolName}. Run: infimium index`;
+    }
+
     const rows = db
       .prepare(
         `SELECT file_path, line_start FROM symbol_locations
@@ -62,6 +66,15 @@ export function expandSymbol(options: ExpandSymbolOptions): string {
   } finally {
     db.close();
   }
+}
+
+function tableExists(
+  db: import("node:sqlite").DatabaseSync,
+  tableName: string
+): boolean {
+  return db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName) !== undefined;
 }
 
 function isWithinRoot(filePath: string, rootPath: string): boolean {
