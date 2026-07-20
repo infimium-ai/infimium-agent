@@ -19,6 +19,14 @@ import {
   readProjectOverview,
   type ProjectOverview
 } from "./project-overview.js";
+import {
+  findWorkspaceProject,
+  loadWorkspaceForProject
+} from "../workspace/workspace.js";
+import {
+  WorkspaceGraphStore,
+  type WorkspaceGraphRelationship
+} from "../workspace/workspace-graph.js";
 
 const DEFAULT_CONTEXT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_CONTEXT_LIMIT = 8;
@@ -28,9 +36,28 @@ const DEFAULT_CHANGED_FILE_LIMIT = 10;
 export type ContextOutputFormat = "yaml" | "json";
 
 export type ContextLayerSnapshot = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   generatedAt: string;
   project: ProjectOverview;
+  workspace: {
+    workspaceId: string;
+    name: string;
+    manifestPath: string;
+    currentProjectId: string;
+    totalProjects: number;
+    omittedProjects: number;
+    projects: Array<{
+      id: string;
+      name: string;
+      path: string;
+      role: string | null;
+      current: boolean;
+      dependsOn: string[];
+      summary: string;
+      index: ContextLayerSnapshot["index"];
+    }>;
+    relationships: WorkspaceGraphRelationship[];
+  } | null;
   contextFilePath: string;
   currentTask: string | null;
   lastNote: string | null;
@@ -178,17 +205,19 @@ export class ContextLayerWriter {
     const recentMemory = compactMemoryEvents(resumeContext.recentEvents);
     const lastNonIndexNote =
       recentMemory.find((event) => event.eventType !== "index")?.summary ?? null;
-    const [project, index, workingTree, recentActivity] = await Promise.all([
+    const [project, workspace, index, workingTree, recentActivity] = await Promise.all([
       readProjectOverview(this.projectPath),
+      readWorkspaceSummary(this.projectPath, this.memoryStore),
       readIndexSummary(this.projectPath),
       readGitWorkingTree(this.projectPath),
       readRecentlyTouchedFiles(this.projectPath, now - this.activityWindowMs, this.recentFileLimit)
     ]);
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       generatedAt: new Date(now).toISOString(),
       project,
+      workspace,
       contextFilePath: this.filePath,
       currentTask: resumeContext.state.currentTask,
       lastNote: lastNonIndexNote ?? resumeContext.state.lastNote,
@@ -295,6 +324,97 @@ async function readIndexSummary(projectPath: string): Promise<ContextLayerSnapsh
       ? new Date(status.lastIndexedAt).toISOString()
       : null
   };
+}
+
+async function readWorkspaceSummary(
+  projectPath: string,
+  memoryStore: ProjectMemoryStore
+): Promise<ContextLayerSnapshot["workspace"]> {
+  const workspace = loadWorkspaceForProject(projectPath);
+  if (!workspace) {
+    return null;
+  }
+
+  const currentProject = findWorkspaceProject(workspace, projectPath);
+  if (!currentProject) {
+    return null;
+  }
+
+  const graphStore = new WorkspaceGraphStore(memoryStore.getDatabasePath(), {
+    initialize: false
+  });
+  let relationships: WorkspaceGraphRelationship[];
+  try {
+    relationships = graphStore.get(workspace.workspaceId).relationships;
+  } finally {
+    graphStore.close();
+  }
+  if (relationships.length === 0) {
+    relationships = workspace.projects.flatMap((project) =>
+      project.dependsOn.map((targetProjectId) => ({
+        sourceProjectId: project.id,
+        targetProjectId,
+        type: "depends_on" as const,
+        weight: 1
+      }))
+    );
+  }
+
+  const orderedProjects = [...workspace.projects].sort((left, right) => {
+    if (left.id === currentProject.id) return -1;
+    if (right.id === currentProject.id) return 1;
+    return left.id.localeCompare(right.id);
+  });
+  const selectedProjects = orderedProjects.slice(0, 12);
+  const projects = await Promise.all(
+    selectedProjects.map(async (workspaceProject) => {
+      const overview = await readStoredOrFreshOverview(memoryStore, workspaceProject.path);
+      return {
+        id: workspaceProject.id,
+        name: overview.name,
+        path: workspaceProject.path,
+        role: workspaceProject.role,
+        current: workspaceProject.id === currentProject.id,
+        dependsOn: workspaceProject.dependsOn,
+        summary: overview.summary,
+        index: await readIndexSummary(workspaceProject.path)
+      };
+    })
+  );
+  const selectedIds = new Set(projects.map((project) => project.id));
+
+  return {
+    workspaceId: workspace.workspaceId,
+    name: workspace.name,
+    manifestPath: workspace.manifestPath,
+    currentProjectId: currentProject.id,
+    totalProjects: workspace.projects.length,
+    omittedProjects: Math.max(0, workspace.projects.length - projects.length),
+    projects,
+    relationships: relationships.filter(
+      (relationship) =>
+        selectedIds.has(relationship.sourceProjectId) &&
+        selectedIds.has(relationship.targetProjectId)
+    )
+  };
+}
+
+async function readStoredOrFreshOverview(
+  memoryStore: ProjectMemoryStore,
+  projectPath: string
+): Promise<ProjectOverview> {
+  const stored = memoryStore.getProjectOverview(projectPath);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored.overviewJson) as unknown;
+      if (isProjectOverview(parsed, projectPath)) {
+        return parsed;
+      }
+    } catch {
+      // Regenerate invalid or outdated cached overviews.
+    }
+  }
+  return readProjectOverview(projectPath);
 }
 
 async function readGitWorkingTree(
@@ -427,7 +547,23 @@ function isContextLayerSnapshot(value: unknown): value is ContextLayerSnapshot {
     typeof value === "object" &&
     value !== null &&
     "schemaVersion" in value &&
+    value.schemaVersion === 3 &&
     "project" in value
+  );
+}
+
+function isProjectOverview(value: unknown, projectPath: string): value is ProjectOverview {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "path" in value &&
+    value.path === resolve(projectPath) &&
+    "projectId" in value &&
+    typeof value.projectId === "string" &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "summary" in value &&
+    typeof value.summary === "string"
   );
 }
 

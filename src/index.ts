@@ -18,6 +18,7 @@ import {
 } from "./commands/memory.js";
 import { runPlanCommand } from "./commands/plan.js";
 import { runSearchCommand } from "./commands/search.js";
+import { runWorkspaceCommand } from "./commands/workspace.js";
 import { startServer } from "./server.js";
 
 async function main(): Promise<void> {
@@ -31,6 +32,11 @@ async function main(): Promise<void> {
 
   if (command === "index") {
     await runIndexCommand();
+    return;
+  }
+
+  if (command === "workspace") {
+    await runWorkspaceCommand(args);
     return;
   }
 

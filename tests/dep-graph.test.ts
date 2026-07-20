@@ -127,4 +127,45 @@ describe("dep graph", () => {
     expect(result.definedIn).toBe(notificationsPath);
     expect(result.importedBy).toContain(join(flutterRoot, "lib", "main.dart"));
   });
+
+  it("preserves cross-project Dart imports when each workspace root is rebuilt", async () => {
+    const workspaceRoot = join(tempDir, "workspace");
+    const appRoot = join(workspaceRoot, "app");
+    const sharedRoot = join(workspaceRoot, "shared");
+    await mkdir(join(appRoot, "lib"), { recursive: true });
+    await mkdir(join(sharedRoot, "lib"), { recursive: true });
+    await writeFile(join(appRoot, "pubspec.yaml"), "name: product_app\n", "utf8");
+    await writeFile(join(sharedRoot, "pubspec.yaml"), "name: shared_models\n", "utf8");
+    await writeFile(
+      join(workspaceRoot, "infimium.workspace.json"),
+      JSON.stringify({
+        name: "Product",
+        projects: [
+          { id: "app", path: "./app", dependsOn: ["shared"] },
+          { id: "shared", path: "./shared" }
+        ]
+      }),
+      "utf8"
+    );
+    const appEntryPath = join(appRoot, "lib", "main.dart");
+    const sharedModelPath = join(sharedRoot, "lib", "model.dart");
+    await writeFile(
+      appEntryPath,
+      "import 'package:shared_models/model.dart';\nvoid main() { SharedModel(); }\n",
+      "utf8"
+    );
+    await writeFile(sharedModelPath, "class SharedModel {}\n", "utf8");
+
+    const builder = new DepGraphBuilder(fakeClient(), sqlitePath);
+    await builder.buildGraph(appRoot);
+    await builder.buildGraph(sharedRoot);
+    builder.close();
+
+    const tool = new DepGraphTool({ sqlitePath, codebasePath: appRoot });
+    const result = tool.query("SharedModel");
+    tool.close();
+
+    expect(result.definedIn).toBe(sharedModelPath);
+    expect(result.importedBy).toContain(appEntryPath);
+  });
 });
