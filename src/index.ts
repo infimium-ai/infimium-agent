@@ -20,6 +20,7 @@ import { runPlanCommand } from "./commands/plan.js";
 import { runSearchCommand } from "./commands/search.js";
 import { runWorkspaceCommand } from "./commands/workspace.js";
 import { startServer } from "./server.js";
+import { protectStdioStdout } from "./stdio.js";
 
 async function main(): Promise<void> {
   const command = process.argv[2] ?? "serve";
@@ -124,6 +125,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "serve") {
+    protectStdioStdout();
     console.error("Infimium MCP server running...");
     await startServer();
     return;
