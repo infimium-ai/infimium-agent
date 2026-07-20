@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Protected MCP stdio by redirecting serve-mode application logs to stderr.
+- Prevented background indexing progress from corrupting JSON-RPC responses.
+
 ## 0.3.0
 
 - Added `infimium.workspace.json` for grouping related repositories.
