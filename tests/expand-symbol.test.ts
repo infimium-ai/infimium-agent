@@ -64,4 +64,18 @@ describe("expand_symbol", () => {
 
     expect(result).toBe("Symbol not found: calculatePrice");
   });
+
+  it("handles an existing database before the first index", () => {
+    const emptySqlitePath = join(tempDir, "fresh-install.db");
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    new DatabaseSync(emptySqlitePath).close();
+
+    expect(
+      expandSymbol({
+        codebasePath: tempDir,
+        symbolName: "calculatePrice",
+        sqlitePath: emptySqlitePath
+      })
+    ).toBe("Symbol not found: calculatePrice. Run: infimium index");
+  });
 });
