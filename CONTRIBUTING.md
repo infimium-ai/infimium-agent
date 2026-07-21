@@ -2,29 +2,19 @@
 
 ## Add a tree-sitter language
 
-1. Install the grammar package:
+1. Decide whether the grammar should be bundled or downloaded on demand. Prefer on-demand WASM for new languages.
 
-   ```bash
-   npm install tree-sitter-<language>
-   ```
+2. Add the file extension and grammar name in `src/indexer/code-parser.ts` and `src/indexer/dynamic-grammar.ts`.
 
-2. Add the file extension mapping in `src/indexer/code-parser.ts`.
+3. Add symbol-node mappings for functions, classes, and methods.
 
-3. Import the grammar in `src/indexer/code-parser.ts`.
+4. Add the extension to the code indexer and dependency graph globs.
 
-4. Update the parser language switch so the new extension loads the new grammar.
+5. Add a fixture in `tests/fixtures/`.
 
-5. Add symbol extraction for the language:
-   - functions
-   - classes
-   - methods
-   - language-specific function forms worth indexing
+6. Add parser assertions in `tests/code-parser.test.ts`.
 
-6. Add a fixture in `tests/fixtures/`.
-
-7. Add parser assertions in `tests/code-parser.test.ts`.
-
-8. If indexing metadata changes, update `tests/code-indexer.test.ts`.
+7. If downloading a grammar, test cache reuse and invalid WASM handling in `tests/dynamic-grammar.test.ts`.
 
 ## Run tests
 
@@ -40,7 +30,7 @@ Integration tests:
 RUN_INTEGRATION=true npm test
 ```
 
-Integration tests may require Ollama, `nomic-embed-text`, and ChromaDB.
+Integration tests may require Ollama and `nomic-embed-text`. Vector storage is embedded; no external database is required.
 
 ## PR checklist
 

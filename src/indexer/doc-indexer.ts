@@ -3,27 +3,30 @@ import { DatabaseSync } from "node:sqlite";
 import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 
 import { load } from "cheerio";
-import { ChromaClient, type Collection, type Metadata } from "chromadb";
 import { glob } from "glob";
 import { PDFParse } from "pdf-parse";
 
-import { createChromaClient } from "../chroma.js";
+import {
+  createVectorClient,
+  type EmbeddedVectorClient,
+  type EmbeddedVectorCollection,
+  type VectorMetadata
+} from "../vector-store.js";
 import type { Config } from "../config.js";
 import { dataPath } from "../paths.js";
 import {
   createProjectFilePolicy,
   filterProjectFiles
 } from "./project-files.js";
+import { splitText } from "./text-splitter.js";
 
 const COLLECTION_NAME = "infimium_docs";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
-const DOC_INDEX_SCHEMA_VERSION = 2;
-const CHUNK_SIZE_CHARS = 512 * 4;
-const CHUNK_OVERLAP_CHARS = 50 * 4;
+const DOC_INDEX_SCHEMA_VERSION = 3;
 const SQLITE_DB_PATH = dataPath("infimium_docs.db");
 const SUPPORTED_EXTENSIONS = new Set([".md", ".txt", ".pdf", ".html"]);
 
-type DocMetadata = Metadata & {
+type DocMetadata = VectorMetadata & {
   filePath: string;
   chunkIndex: number;
   mtime: number;
@@ -57,17 +60,17 @@ export type IndexStats = {
 };
 
 export class DocIndexer {
-  private readonly chroma: ChromaClient;
+  private readonly vectors: EmbeddedVectorClient;
   private readonly ollamaHost: string;
   private readonly sqlitePath: string;
   private db: DatabaseSync | null = null;
 
   constructor(
     config: Pick<Config, "ollamaHost">,
-    chromaClient: ChromaClient = createChromaClient(),
+    vectorClient: EmbeddedVectorClient = createVectorClient(),
     sqlitePath: string = SQLITE_DB_PATH
   ) {
-    this.chroma = chromaClient;
+    this.vectors = vectorClient;
     this.ollamaHost = config.ollamaHost;
     this.sqlitePath = resolve(sqlitePath);
   }
@@ -96,7 +99,15 @@ export class DocIndexer {
         filePath
       });
 
-      const result = await this.indexFile(collection, filePath, rootPath);
+      let result: { skipped: boolean; chunksCreated: number };
+      try {
+        result = await this.indexFile(collection, filePath, rootPath);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Warning: skipped ${filePath}: ${message}`);
+        stats.filesSkipped += 1;
+        continue;
+      }
       if (result.skipped) {
         stats.filesSkipped += 1;
         continue;
@@ -130,8 +141,8 @@ export class DocIndexer {
     this.db = null;
   }
 
-  private async getCollection(): Promise<Collection> {
-    return this.chroma.getOrCreateCollection({
+  private async getCollection(): Promise<EmbeddedVectorCollection> {
+    return this.vectors.getOrCreateCollection({
       name: COLLECTION_NAME,
       embeddingFunction: null
     });
@@ -153,7 +164,7 @@ export class DocIndexer {
   }
 
   private async pruneStaleFiles(
-    collection: Collection,
+    collection: EmbeddedVectorCollection,
     rootPath: string,
     currentFilePaths: string[]
   ): Promise<number> {
@@ -176,7 +187,7 @@ export class DocIndexer {
   }
 
   private async indexFile(
-    collection: Collection,
+    collection: EmbeddedVectorCollection,
     filePath: string,
     projectPath: string
   ): Promise<{ skipped: boolean; chunksCreated: number }> {
@@ -190,7 +201,7 @@ export class DocIndexer {
     await collection.delete({ where: { filePath } });
 
     const text = await this.readDocument(filePath);
-    const chunks = chunkText(text);
+    const chunks = splitText(text);
     if (chunks.length > 0) {
       await this.storeChunks(collection, filePath, projectPath, mtime, chunks);
     }
@@ -225,7 +236,7 @@ export class DocIndexer {
   }
 
   private async storeChunks(
-    collection: Collection,
+    collection: EmbeddedVectorCollection,
     filePath: string,
     projectPath: string,
     mtime: number,
@@ -328,28 +339,6 @@ async function readPdf(filePath: string): Promise<string> {
   } finally {
     await parser.destroy();
   }
-}
-
-function chunkText(text: string): string[] {
-  const normalized = text.replace(/\r\n/g, "\n").trim();
-  if (!normalized) {
-    return [];
-  }
-
-  const chunks: string[] = [];
-  let start = 0;
-  while (start < normalized.length) {
-    const end = Math.min(start + CHUNK_SIZE_CHARS, normalized.length);
-    chunks.push(normalized.slice(start, end));
-
-    if (end === normalized.length) {
-      break;
-    }
-
-    start = Math.max(end - CHUNK_OVERLAP_CHARS, start + 1);
-  }
-
-  return chunks;
 }
 
 function parseIndexedDocRow(row: unknown): IndexedDocRow | null {

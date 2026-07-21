@@ -180,6 +180,15 @@ export async function runPlanTool(
 export function formatPlanError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const lowerMessage = message.toLowerCase();
+  const missingPlanModelCommand = message.match(/run:\s*(ollama\s+pull\s+[\w.:/-]+)/i)?.[1];
+
+  if (lowerMessage.includes("ollama plan generation failed") && missingPlanModelCommand) {
+    return [
+      "Plan failed: Ollama is missing the local plan-generation model.",
+      `Fix: ${missingPlanModelCommand}`,
+      "Then: npx infimium plan \"add a simple health check endpoint\""
+    ].join("\n");
+  }
 
   if (
     lowerMessage.includes("fetch failed") ||
@@ -194,13 +203,13 @@ export function formatPlanError(error: unknown): string {
   }
 
   if (
-    lowerMessage.includes("chromadb") ||
+    lowerMessage.includes("vector index") ||
     lowerMessage.includes("connection refused") ||
     lowerMessage.includes("failed to connect")
   ) {
     return [
-      "Plan failed: semantic code context could not be read from ChromaDB.",
-      "Fix: docker run -d --name infimium-chromadb -p 8000:8000 -v chroma_data:/chroma/chroma chromadb/chroma:latest"
+      "Plan failed: semantic code context could not be read from the embedded index.",
+      "Fix: npx infimium index"
     ].join("\n");
   }
 

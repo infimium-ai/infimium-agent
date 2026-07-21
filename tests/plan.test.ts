@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPlanPrompt,
   createPlan,
+  formatPlanError,
   formatPlanResult
 } from "../src/commands/plan.js";
 import type { DepGraphResult } from "../src/tools/dep-graph.js";
@@ -26,7 +27,10 @@ const depGraphResult: DepGraphResult = {
   symbol: "runDoctorCommand",
   definedIn: "/repo/src/commands/doctor.ts",
   importedBy: ["/repo/src/index.ts"],
-  imports: ["/repo/src/paths.ts"]
+  imports: ["/repo/src/paths.ts"],
+  calledBy: [],
+  calls: [],
+  routes: []
 };
 
 function fakeSearcher(results: CodeResult[]) {
@@ -105,5 +109,14 @@ describe("plan command", () => {
     expect(result.writtenPath).toBe(outputPath);
     expect(written).toContain("# Infimium plan");
     expect(written).toContain("## Plan");
+  });
+
+  it("prints the exact model pull command when the plan model is missing", () => {
+    const output = formatPlanError(
+      new Error("Ollama plan generation failed with HTTP 404. Run: ollama pull llama3.1")
+    );
+
+    expect(output).toContain("Plan failed: Ollama is missing the local plan-generation model.");
+    expect(output).toContain("Fix: ollama pull llama3.1");
   });
 });
