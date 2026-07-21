@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- Fixed Playground SPA fallback serving in global npm installs.
+
 ## 0.4.2
 
 - Fixed packaged `infimium playground` static asset resolution.
