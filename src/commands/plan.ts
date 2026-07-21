@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import { loadConfig } from "../config.js";
 import { ProjectMemoryStore } from "../memory/project-memory.js";
@@ -146,7 +146,7 @@ export async function createPlan(options: PlanOptions): Promise<PlanResult> {
     };
 
     if (options.writePlan) {
-      const outputPath = resolve(options.outputPath ?? "plan.md");
+      const outputPath = resolvePlanOutputPath(options.outputPath ?? "plan.md", codebasePath);
       await writeFile(outputPath, formatPlanMarkdown(result, codebasePath), "utf8");
       result.writtenPath = outputPath;
     }
@@ -339,6 +339,10 @@ function readFlagValue(args: string[], index: number, flag: string): string {
   }
 
   return value;
+}
+
+function resolvePlanOutputPath(outputPath: string, codebasePath: string): string {
+  return isAbsolute(outputPath) ? resolve(outputPath) : resolve(codebasePath, outputPath);
 }
 
 async function retrievePlanContext(args: {

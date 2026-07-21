@@ -9,7 +9,7 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   root: rootDir,
-  publicDir: false,
+  publicDir: "public",
   plugins: [react(), tailwindcss()],
   build: {
     outDir: resolve(rootDir, "../dist/playground-ui"),
