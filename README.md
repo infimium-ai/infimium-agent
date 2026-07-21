@@ -10,6 +10,10 @@ Private context layer for AI coding agents. Search code and docs, inspect depend
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
+## Demo
+
+[![Infimium demo](docs/assets/infimium-demo.gif)](docs/assets/infimium-demo.mp4)
+
 ## Why
 
 Large repositories make agents read too much code or miss the right symbol. Infimium retrieves compact, relevant context before the agent starts editing.
@@ -213,10 +217,6 @@ Set up Infimium in this repository. Install/start Ollama, pull nomic-embed-text,
 run npx infimium init, run npx infimium index, and make all six
 npx infimium doctor checks pass. Do not commit secrets.
 ```
-
-## Demo
-
-[![Infimium demo](docs/assets/infimium-demo.gif)](docs/assets/infimium-demo.mp4)
 
 ## Contributing
 
