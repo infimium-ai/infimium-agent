@@ -15,6 +15,23 @@ export type DepGraphResult = {
   definedIn: string | null;
   importedBy: string[];
   imports: string[];
+  calledBy: SymbolCallResult[];
+  calls: SymbolCallResult[];
+  routes: HttpRouteResult[];
+};
+
+export type SymbolCallResult = {
+  symbol: string;
+  filePath: string;
+  lineStart: number;
+};
+
+export type HttpRouteResult = {
+  method: string;
+  path: string;
+  filePath: string;
+  lineStart: number;
+  framework: string;
 };
 
 type DepGraphToolOptions = {
@@ -28,6 +45,20 @@ type SymbolLocationRow = {
 
 type FilePathRow = {
   file_path: string;
+};
+
+type SymbolCallRow = {
+  symbol: string;
+  file_path: string;
+  line_start: number;
+};
+
+type HttpRouteRow = {
+  method: string;
+  route_path: string;
+  file_path: string;
+  line_start: number;
+  framework: string;
 };
 
 export class DepGraphTool {
@@ -55,7 +86,10 @@ export class DepGraphTool {
         symbol,
         definedIn: null,
         importedBy: [],
-        imports: []
+        imports: [],
+        calledBy: [],
+        calls: [],
+        routes: []
       };
     }
 
@@ -63,7 +97,10 @@ export class DepGraphTool {
       symbol,
       definedIn,
       importedBy: this.findImportedBy(definedIn),
-      imports: this.findImports(definedIn)
+      imports: this.findImports(definedIn),
+      calledBy: this.findCalledBy(symbol),
+      calls: this.findCalls(symbol),
+      routes: this.findRoutes(symbol)
     };
   }
 
@@ -112,6 +149,51 @@ export class DepGraphTool {
       .map((row) => row.file_path);
   }
 
+  private findCalledBy(symbolName: string): SymbolCallResult[] {
+    return this.getDb()
+      .prepare(
+        `SELECT caller_symbol AS symbol, caller_file AS file_path, line_start
+         FROM symbol_calls WHERE callee_symbol = ?
+         ORDER BY caller_file, line_start`
+      )
+      .all(symbolName)
+      .map(parseSymbolCallRow)
+      .filter((row): row is SymbolCallRow => row !== null)
+      .map(toSymbolCallResult);
+  }
+
+  private findCalls(symbolName: string): SymbolCallResult[] {
+    return this.getDb()
+      .prepare(
+        `SELECT callee_symbol AS symbol, caller_file AS file_path, line_start
+         FROM symbol_calls WHERE caller_symbol = ?
+         ORDER BY line_start, callee_symbol`
+      )
+      .all(symbolName)
+      .map(parseSymbolCallRow)
+      .filter((row): row is SymbolCallRow => row !== null)
+      .map(toSymbolCallResult);
+  }
+
+  private findRoutes(symbolName: string): HttpRouteResult[] {
+    return this.getDb()
+      .prepare(
+        `SELECT method, route_path, file_path, line_start, framework
+         FROM http_routes WHERE handler_symbol = ?
+         ORDER BY file_path, line_start`
+      )
+      .all(symbolName)
+      .map(parseHttpRouteRow)
+      .filter((row): row is HttpRouteRow => row !== null)
+      .map((row) => ({
+        method: row.method,
+        path: row.route_path,
+        filePath: row.file_path,
+        lineStart: row.line_start,
+        framework: row.framework
+      }));
+  }
+
   private getDb(): import("node:sqlite").DatabaseSync {
     if (!this.db) {
       const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -129,6 +211,24 @@ export class DepGraphTool {
           line_start INTEGER,
           PRIMARY KEY (symbol_name, file_path)
         );
+
+        CREATE TABLE IF NOT EXISTS symbol_calls (
+          caller_symbol TEXT NOT NULL,
+          caller_file TEXT NOT NULL,
+          callee_symbol TEXT NOT NULL,
+          line_start INTEGER NOT NULL,
+          PRIMARY KEY (caller_symbol, caller_file, callee_symbol, line_start)
+        );
+
+        CREATE TABLE IF NOT EXISTS http_routes (
+          method TEXT NOT NULL,
+          route_path TEXT NOT NULL,
+          handler_symbol TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          line_start INTEGER NOT NULL,
+          framework TEXT NOT NULL,
+          PRIMARY KEY (method, route_path, file_path, line_start)
+        );
       `);
     }
 
@@ -145,6 +245,9 @@ export function formatDepGraphResult(
     : "Not found";
   const importedBy = formatPathList(result.importedBy, codebasePath);
   const imports = formatPathList(result.imports, codebasePath);
+  const calledBy = formatCallList(result.calledBy, codebasePath);
+  const calls = formatCallList(result.calls, codebasePath);
+  const routes = formatRouteList(result.routes, codebasePath);
 
   return [
     `Symbol: ${result.symbol}()`,
@@ -154,7 +257,16 @@ export function formatDepGraphResult(
     importedBy,
     "",
     "This file imports:",
-    imports
+    imports,
+    "",
+    `Called by (${result.calledBy.length} symbols):`,
+    calledBy,
+    "",
+    `Calls (${result.calls.length} symbols):`,
+    calls,
+    "",
+    `HTTP routes (${result.routes.length}):`,
+    routes
   ].join("\n");
 }
 
@@ -177,6 +289,23 @@ function formatPathList(paths: string[], codebasePath?: string | null): string {
   }
 
   return paths.map((filePath) => `  → ${displayPath(filePath, codebasePath)}`).join("\n");
+}
+
+function formatCallList(calls: SymbolCallResult[], codebasePath?: string | null): string {
+  if (calls.length === 0) return "  None";
+  return calls
+    .map((call) => `  → ${call.symbol}() — ${displayPath(call.filePath, codebasePath)}:${call.lineStart}`)
+    .join("\n");
+}
+
+function formatRouteList(routes: HttpRouteResult[], codebasePath?: string | null): string {
+  if (routes.length === 0) return "  None";
+  return routes
+    .map(
+      (route) =>
+        `  → ${route.method} ${route.path} — ${displayPath(route.filePath, codebasePath)}:${route.lineStart} (${route.framework})`
+    )
+    .join("\n");
 }
 
 function displayPath(filePath: string, codebasePath?: string | null): string {
@@ -215,6 +344,38 @@ function parseFilePathRow(row: unknown): FilePathRow | null {
   }
 
   return { file_path: row.file_path };
+}
+
+function parseSymbolCallRow(row: unknown): SymbolCallRow | null {
+  if (
+    !isRecord(row) ||
+    typeof row.symbol !== "string" ||
+    typeof row.file_path !== "string" ||
+    typeof row.line_start !== "number"
+  ) return null;
+  return { symbol: row.symbol, file_path: row.file_path, line_start: row.line_start };
+}
+
+function toSymbolCallResult(row: SymbolCallRow): SymbolCallResult {
+  return { symbol: row.symbol, filePath: row.file_path, lineStart: row.line_start };
+}
+
+function parseHttpRouteRow(row: unknown): HttpRouteRow | null {
+  if (
+    !isRecord(row) ||
+    typeof row.method !== "string" ||
+    typeof row.route_path !== "string" ||
+    typeof row.file_path !== "string" ||
+    typeof row.line_start !== "number" ||
+    typeof row.framework !== "string"
+  ) return null;
+  return {
+    method: row.method,
+    route_path: row.route_path,
+    file_path: row.file_path,
+    line_start: row.line_start,
+    framework: row.framework
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

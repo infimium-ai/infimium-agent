@@ -2,6 +2,7 @@
 
 import { initEnv } from "./cli/init.js";
 import { runIndexCommand } from "./cli/index-cmd.js";
+import { runPlaygroundCommand } from "./cli/playground.js";
 import { runStatusCommand } from "./cli/status-cmd.js";
 import { runWatchCommand } from "./cli/watch-cmd.js";
 import { runCodeSearchCommand } from "./commands/code-search.js";
@@ -21,18 +22,21 @@ import { runSearchCommand } from "./commands/search.js";
 import { runWorkspaceCommand } from "./commands/workspace.js";
 import { startServer } from "./server.js";
 import { protectStdioStdout } from "./stdio.js";
+import { runTelemetryCommand } from "./telemetry.js";
 
 async function main(): Promise<void> {
   const command = process.argv[2] ?? "serve";
   const args = process.argv.slice(3);
 
   if (command === "init") {
-    await initEnv();
+    await initEnv(undefined, {
+      telemetryEnabled: !args.includes("--no-telemetry")
+    });
     return;
   }
 
   if (command === "index") {
-    await runIndexCommand();
+    await runIndexCommand(args);
     return;
   }
 
@@ -121,6 +125,16 @@ async function main(): Promise<void> {
 
   if (command === "plan") {
     await runPlanCommand(args);
+    return;
+  }
+
+  if (command === "playground") {
+    await runPlaygroundCommand();
+    return;
+  }
+
+  if (command === "telemetry") {
+    await runTelemetryCommand(args);
     return;
   }
 

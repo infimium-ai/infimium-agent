@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.1
+
+- Added privacy-safe PostHog lifecycle telemetry with opt-out controls.
+- Added `infimium telemetry status|on|off`.
+- Hardened Playground empty-index behavior on fresh installs.
+
+## 0.4.0
+
+- Added automatic multi-project discovery to `infimium index`, including role inference, dependency suggestions, confirmation, workspace manifest creation, and Playground launch.
+- Replaced ChromaDB with an embedded SQLite vector store and removed the Docker service requirement.
+- Added global optional configuration so projects no longer need their own `.env` file.
+- Added recursive, boundary-aware document splitting and corrupt-document skipping.
+- Added on-demand cached Tree-sitter WASM grammars for Go, Rust, and Java.
+- Added symbol caller/callee and HTTP-route edges to the dependency graph.
+
 ## 0.3.1
 
 - Protected MCP stdio by redirecting serve-mode application logs to stderr.

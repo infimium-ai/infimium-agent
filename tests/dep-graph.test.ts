@@ -52,6 +52,9 @@ describe("dep graph", () => {
     expect(result.definedIn).toBe(calcFilePath);
     expect(result.importedBy.some((filePath) => filePath.endsWith("api/routes/listing.ts"))).toBe(true);
     expect(result.importedBy.some((filePath) => filePath.endsWith("utils/tax.ts"))).toBe(true);
+    expect(result.calledBy.map((call) => call.symbol)).toEqual(
+      expect.arrayContaining(["getListingPrice", "estimatePropertyTax"])
+    );
   });
 
   it("returns an empty graph for unknown symbols", async () => {
@@ -67,8 +70,38 @@ describe("dep graph", () => {
       symbol: "unknownSymbol",
       definedIn: null,
       importedBy: [],
-      imports: []
+      imports: [],
+      calledBy: [],
+      calls: [],
+      routes: []
     });
+  });
+
+  it("maps HTTP routes to their handler symbols", async () => {
+    const appRoot = join(tempDir, "api-app");
+    await mkdir(appRoot, { recursive: true });
+    const routePath = join(appRoot, "routes.ts");
+    await writeFile(
+      routePath,
+      [
+        "const app = createApp();",
+        "export function listUsers(): string { return 'users'; }",
+        "app.get('/users', listUsers);"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const builder = new DepGraphBuilder(fakeClient(), sqlitePath);
+    await builder.buildGraph(appRoot);
+    builder.close();
+
+    const tool = new DepGraphTool({ sqlitePath, codebasePath: appRoot });
+    const result = tool.query("listUsers");
+    tool.close();
+
+    expect(result.routes).toEqual([
+      expect.objectContaining({ method: "GET", path: "/users", filePath: routePath })
+    ]);
   });
 
   it("resolves TypeScript source files imported with .js specifiers", async () => {

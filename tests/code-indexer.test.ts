@@ -47,7 +47,7 @@ describe("CodeIndexer", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("embeds and inserts parsed symbols into ChromaDB", async () => {
+  it("embeds and inserts parsed symbols into the vector store", async () => {
     const filePath = join(tempDir, "sample.ts");
     await writeFile(
       filePath,
@@ -178,7 +178,47 @@ describe("CodeIndexer", () => {
     expect(collection.upsert).toHaveBeenCalledTimes(1);
   });
 
-  it("prunes deleted files from SQLite and ChromaDB", async () => {
+  it("repairs unchanged tracking rows when vector metadata is missing", async () => {
+    const filePath = join(tempDir, "migration.ts");
+    await writeFile(filePath, "export function migrationProbe(): void {}\n", "utf8");
+    const collection = {
+      delete: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue({ metadatas: [] }),
+      upsert: vi.fn().mockResolvedValue(undefined)
+    };
+    const client = fakeClient(collection);
+
+    const firstIndexer = new CodeIndexer(
+      { ollamaHost: "http://ollama.test" },
+      client,
+      undefined,
+      sqlitePath,
+      join(tempDir, "dep-graph.db")
+    );
+    await firstIndexer.indexCodebase(tempDir);
+    firstIndexer.close();
+
+    const repairIndexer = new CodeIndexer(
+      { ollamaHost: "http://ollama.test" },
+      client,
+      undefined,
+      sqlitePath,
+      join(tempDir, "dep-graph.db")
+    );
+    const repairStats = await repairIndexer.indexCodebase(tempDir);
+    repairIndexer.close();
+
+    expect(repairStats).toEqual({
+      filesProcessed: 1,
+      symbolsIndexed: 1,
+      filesSkipped: 0,
+      filesPruned: 0
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(collection.upsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("prunes deleted files from SQLite and the vector store", async () => {
     const filePath = join(tempDir, "deleted.ts");
     await writeFile(filePath, "export function removed(): void {}\n", "utf8");
     const collection = {

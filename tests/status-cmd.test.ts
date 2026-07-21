@@ -38,7 +38,7 @@ describe("status command", () => {
       docsDbPath: join(tempDir, "missing-docs.db"),
       codeDbPath: join(tempDir, "missing-code.db"),
       graphDbPath: join(tempDir, "missing-graph.db"),
-      chromaClient: {
+      vectorClient: {
         getCollection: vi.fn()
       }
     });
@@ -46,7 +46,7 @@ describe("status command", () => {
     expect(status).toBeNull();
   });
 
-  it("reads docs, code, graph, project, and Chroma counts", async () => {
+  it("reads docs, code, graph, project, and vector counts", async () => {
     const docsDbPath = join(tempDir, "infimium_docs.db");
     const codeDbPath = join(tempDir, "infimium_code.db");
     const graphDbPath = join(tempDir, "infimium.db");
@@ -102,7 +102,7 @@ describe("status command", () => {
       docsDbPath,
       codeDbPath,
       graphDbPath,
-      chromaClient: {
+      vectorClient: {
         getCollection: vi.fn().mockResolvedValue({
           count: chromaCount
         })

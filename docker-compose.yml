@@ -6,32 +6,17 @@ services:
       - ${CODEBASE_PATH:-./code}:/data/code:ro
       - infimium_db:/app/data
       - ollama_models:/root/.ollama
-    env_file: .env
     environment:
       LOCAL_DOCS_PATH: /data/docs
       CODEBASE_PATH: /data/code
-      CHROMADB_HOST: http://chromadb:8000
       INFIMIUM_DATA_DIR: /app/data
       OLLAMA_HOST: http://localhost:11434
-    depends_on:
-      chromadb:
-        condition: service_healthy
+      SEARCH_API_KEY: ${SEARCH_API_KEY:-}
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-tinyfish}
+      SHELL_ALLOWLIST: ${SHELL_ALLOWLIST:-ls,git,pwd,npm,npx}
     stdin_open: true
     tty: true
 
-  chromadb:
-    image: chromadb/chroma:latest
-    volumes:
-      - chroma_data:/chroma/chroma
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-
 volumes:
   infimium_db:
-  chroma_data:
   ollama_models:

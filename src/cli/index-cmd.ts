@@ -1,8 +1,16 @@
+import { createInterface } from "node:readline/promises";
+
 import { loadConfig } from "../config.js";
 import type { Config } from "../config.js";
 import { CodeIndexer } from "../indexer/code-indexer.js";
 import { displayPath, DocIndexer } from "../indexer/doc-indexer.js";
 import { ProjectMemoryStore } from "../memory/project-memory.js";
+import { trackSetupCompleted, trackTelemetry } from "../telemetry.js";
+import {
+  detectMultiProjectWorkspace,
+  writeDetectedWorkspaceManifest,
+  type WorkspaceDiscovery
+} from "../workspace/discovery.js";
 import {
   findWorkspaceManifest,
   findWorkspaceProject,
@@ -11,6 +19,8 @@ import {
   type InfimiumWorkspace
 } from "../workspace/workspace.js";
 import { WorkspaceGraphStore } from "../workspace/workspace-graph.js";
+import { parseIndexArgs } from "./index-options.js";
+import { runPlaygroundCommand } from "./playground.js";
 
 export type IndexPaths = {
   localDocsPath: string | null;
@@ -25,19 +35,108 @@ export type IndexRunStats = {
   filesPruned: number;
 };
 
-export async function runIndexCommand(): Promise<void> {
+export type IndexCommandOptions = {
+  cwd?: string;
+  stdinIsTTY?: boolean;
+  confirmWorkspace?: (discovery: WorkspaceDiscovery) => Promise<boolean>;
+  launchPlayground?: (projectPath: string) => Promise<void>;
+};
+
+export async function runIndexCommand(
+  args: string[] = process.argv.slice(3),
+  options: IndexCommandOptions = {}
+): Promise<void> {
+  await trackTelemetry("index_started");
+  const parsedArgs = parseIndexArgs(args);
   const config = loadConfig({ requireSearchApiKey: false });
+  const cwd = options.cwd ?? process.cwd();
   const workspaceStartPath = config.codebasePath ?? config.localDocsPath ?? process.cwd();
-  const manifestPath = findWorkspaceManifest(workspaceStartPath);
+  const manifestPath = findWorkspaceManifest(cwd) ?? findWorkspaceManifest(workspaceStartPath);
   if (manifestPath) {
     await runIndexForWorkspace(config, loadWorkspace(manifestPath), workspaceStartPath);
+    await trackIndexCompleted({ workspace: true });
     return;
+  }
+
+  if (parsedArgs.detectWorkspace) {
+    const discovery =
+      await detectMultiProjectWorkspace(cwd) ??
+      (workspaceStartPath === cwd
+        ? null
+        : await detectMultiProjectWorkspace(workspaceStartPath));
+    if (discovery) {
+      printWorkspaceDiscovery(discovery);
+      const confirmed = parsedArgs.acceptWorkspace
+        ? true
+        : await confirmWorkspaceCreation(discovery, options);
+
+      if (confirmed) {
+        const createdManifestPath = await writeDetectedWorkspaceManifest(discovery);
+        console.log(`Created ${createdManifestPath}`);
+        await runIndexForWorkspace(
+          config,
+          loadWorkspace(createdManifestPath),
+          workspaceStartPath
+        );
+        await trackIndexCompleted({ workspace: true });
+
+        if (parsedArgs.openPlayground) {
+          console.log("\nOpening Infimium Playground with the new workspace...");
+          const launch = options.launchPlayground ?? ((projectPath: string) =>
+            runPlaygroundCommand({ projectPath }));
+          await launch(discovery.rootPath);
+        }
+        return;
+      }
+      console.log("Workspace creation skipped. No files were indexed.");
+      console.log("Run with --no-workspace to intentionally index only the current path.");
+      return;
+    }
   }
 
   await runIndexForPaths(config, {
     localDocsPath: config.localDocsPath,
     codebasePath: config.codebasePath
   });
+  await trackIndexCompleted({ workspace: false });
+}
+
+function printWorkspaceDiscovery(discovery: WorkspaceDiscovery): void {
+  console.log("\nDetected a multi-project workspace:\n");
+  const nameWidth = Math.max(...discovery.projects.map((project) => project.name.length));
+  for (const project of discovery.projects) {
+    const dependencies = project.dependsOn.length > 0
+      ? ` · depends on ${project.dependsOn.join(", ")}`
+      : "";
+    console.log(`  ${project.name.padEnd(nameWidth)}    ${project.role}${dependencies}`);
+  }
+  console.log("");
+}
+
+async function confirmWorkspaceCreation(
+  discovery: WorkspaceDiscovery,
+  options: IndexCommandOptions
+): Promise<boolean> {
+  if (options.confirmWorkspace) {
+    return options.confirmWorkspace(discovery);
+  }
+
+  const isInteractive = options.stdinIsTTY ?? Boolean(process.stdin.isTTY);
+  if (!isInteractive) {
+    console.log("Workspace confirmation requires an interactive terminal.");
+    console.log("Run: npx infimium index --yes");
+    return false;
+  }
+
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await prompt.question(
+      `Create infimium.workspace.json in ${discovery.rootPath} and index all projects? [Y/n] `
+    )).trim().toLowerCase();
+    return answer === "" || answer === "y" || answer === "yes";
+  } finally {
+    prompt.close();
+  }
 }
 
 export async function runIndexForProject(projectPath: string): Promise<void> {
@@ -177,4 +276,9 @@ function syncWorkspaceGraph(workspace: InfimiumWorkspace) {
   } finally {
     store.close();
   }
+}
+
+async function trackIndexCompleted(properties: { workspace: boolean }): Promise<void> {
+  await trackTelemetry("index_completed", properties);
+  await trackSetupCompleted({ source: "index" });
 }
