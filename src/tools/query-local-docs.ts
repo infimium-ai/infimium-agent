@@ -1,4 +1,5 @@
 import { ChromaClient } from "chromadb";
+import { resolve } from "node:path";
 
 import { createChromaClient } from "../chroma.js";
 
@@ -16,6 +17,7 @@ export type DocResult = {
 type DocsMetadata = {
   filePath?: unknown;
   chunkIndex?: unknown;
+  projectPath?: unknown;
 };
 
 type QueryResultLike = {
@@ -30,6 +32,7 @@ type CollectionLike = {
     queryEmbeddings: number[][];
     nResults: number;
     include: Array<"documents" | "metadatas" | "distances">;
+    where?: { projectPath: { $eq: string } };
   }): Promise<QueryResultLike>;
 };
 
@@ -70,18 +73,19 @@ export class LocalDocsSearch {
   private readonly chromaClient: ChromaClientLike;
 
   constructor(options: LocalDocsSearchOptions) {
-    this.localDocsPath = options.localDocsPath;
+    this.localDocsPath = options.localDocsPath ? resolve(options.localDocsPath) : null;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
     this.chromaClient = options.chromaClient ?? createChromaClient();
   }
 
   async search(query: string, topK: number): Promise<DocResult[]> {
-    if (!this.localDocsPath) {
+    const localDocsPath = this.localDocsPath;
+    if (!localDocsPath) {
       throw new LocalDocsNotConfiguredError();
     }
 
     const collection = await this.getCollection();
-    const results = await this.queryCollection(collection, query, topK);
+    const results = await this.queryCollection(collection, query, topK, localDocsPath);
 
     return deduplicateAdjacentChunks(results).slice(0, topK);
   }
@@ -104,7 +108,8 @@ export class LocalDocsSearch {
   private async queryCollection(
     collection: CollectionLike,
     query: string,
-    topK: number
+    topK: number,
+    projectPath: string
   ): Promise<DocResult[]> {
     try {
       const count = await collection.count();
@@ -116,7 +121,8 @@ export class LocalDocsSearch {
       const rawResults = await collection.query({
         queryEmbeddings: [queryEmbedding],
         nResults: topK * 2,
-        include: ["documents", "metadatas", "distances"]
+        include: ["documents", "metadatas", "distances"],
+        where: { projectPath: { $eq: projectPath } }
       });
 
       return parseQueryResults(rawResults);

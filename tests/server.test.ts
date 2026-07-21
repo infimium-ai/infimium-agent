@@ -1,8 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const expectedToolNames = [
@@ -11,6 +12,7 @@ const expectedToolNames = [
   "fetch_url",
   "query_local_docs",
   "semantic_code_search",
+  "expand_symbol",
   "dep_graph",
   "shell",
   "plan",
@@ -19,6 +21,7 @@ const expectedToolNames = [
 ] as const;
 
 const tmpDir = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+const serverDataDir = mkdtempSync(join(tmpDir, "infimium-server-test-"));
 const builtServerPath = "dist/src/index.js";
 const serverArgs = existsSync(builtServerPath)
   ? [builtServerPath, "serve"]
@@ -33,6 +36,7 @@ const validToolInputs: Record<
   fetch_url: { url: "data:text/html,<main>Hello from Infimium</main>", extract: "markdown" },
   query_local_docs: { query: "setup", top_k: 1 },
   semantic_code_search: { query: "server", top_k: 1 },
+  expand_symbol: { symbol_name: "createServer" },
   dep_graph: { symbol_name: "createServer" },
   shell: { command: "ls", timeout: 1 },
   plan: { task: "add a doctor command", dry_run: true, top_k: 1 },
@@ -57,7 +61,7 @@ describe("Infimium MCP server", () => {
       stderr: "pipe",
       env: {
         ...(tmpDir ? { TMPDIR: tmpDir } : {}),
-        INFIMIUM_DATA_DIR: tmpDir,
+        INFIMIUM_DATA_DIR: serverDataDir,
         SEARCH_API_KEY: "test-key",
         SHELL_ALLOWLIST: "ls,sleep"
       }
@@ -68,9 +72,10 @@ describe("Infimium MCP server", () => {
 
   afterAll(async () => {
     await transport.close();
+    rmSync(serverDataDir, { recursive: true, force: true });
   });
 
-  it("lists exactly the ten Infimium tools", async () => {
+  it("lists exactly the eleven Infimium tools", async () => {
     const response = await client.listTools(undefined, { timeout: 2_000 });
     const toolNames = response.tools.map((tool) => tool.name).sort();
 

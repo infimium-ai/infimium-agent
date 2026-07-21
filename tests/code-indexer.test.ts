@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -15,7 +15,7 @@ type FakeCollection = {
 type UpsertArgs = {
   ids: string[];
   documents: string[];
-  metadatas: Array<{ name: string }>;
+  metadatas: Array<{ name: string; signature: string }>;
 };
 
 function embeddingResponse(): Response {
@@ -95,7 +95,8 @@ describe("CodeIndexer", () => {
     expect(stats).toEqual({
       filesProcessed: 1,
       symbolsIndexed: 3,
-      filesSkipped: 0
+      filesSkipped: 0,
+      filesPruned: 0
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
     expect(collection.delete).toHaveBeenCalledWith({ where: { filePath } });
@@ -108,6 +109,7 @@ describe("CodeIndexer", () => {
       "second",
       "Third"
     ]);
+    expect(upsertArgs.metadatas[0]?.signature).toContain("function first");
   });
 
   it("skips unchanged files without re-embedding symbols", async () => {
@@ -168,10 +170,45 @@ describe("CodeIndexer", () => {
     expect(secondStats).toEqual({
       filesProcessed: 0,
       symbolsIndexed: 0,
-      filesSkipped: 1
+      filesSkipped: 1,
+      filesPruned: 0
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
     expect(collection.delete).toHaveBeenCalledTimes(1);
     expect(collection.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("prunes deleted files from SQLite and ChromaDB", async () => {
+    const filePath = join(tempDir, "deleted.ts");
+    await writeFile(filePath, "export function removed(): void {}\n", "utf8");
+    const collection = {
+      delete: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue({ metadatas: [] }),
+      upsert: vi.fn().mockResolvedValue(undefined)
+    };
+    const chromaClient = fakeClient(collection);
+    const firstIndexer = new CodeIndexer(
+      { ollamaHost: "http://ollama.test" },
+      chromaClient,
+      undefined,
+      sqlitePath,
+      join(tempDir, "dep-graph.db")
+    );
+    await firstIndexer.indexCodebase(tempDir);
+    firstIndexer.close();
+
+    await unlink(filePath);
+    const secondIndexer = new CodeIndexer(
+      { ollamaHost: "http://ollama.test" },
+      chromaClient,
+      undefined,
+      sqlitePath,
+      join(tempDir, "dep-graph.db")
+    );
+    const stats = await secondIndexer.indexCodebase(tempDir);
+    secondIndexer.close();
+
+    expect(stats.filesPruned).toBe(1);
+    expect(collection.delete).toHaveBeenLastCalledWith({ where: { filePath } });
   });
 });

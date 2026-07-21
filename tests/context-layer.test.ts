@@ -1,8 +1,10 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 
 import { ContextLayerWriter, readContextLayer } from "../src/memory/context-layer.js";
 import { ProjectMemoryStore } from "../src/memory/project-memory.js";
@@ -26,7 +28,7 @@ describe("context layer", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("writes JSON context to layer.md and stores the latest snapshot in SQLite", async () => {
+  it("writes YAML context with a project overview and stores the latest snapshot", async () => {
     const memoryStore = new ProjectMemoryStore(dbPath);
     try {
       memoryStore.remember({
@@ -45,13 +47,15 @@ describe("context layer", () => {
       });
       const snapshot = await writer.refresh();
       const written = await readFile(contextFilePath, "utf8");
-      const parsed = JSON.parse(written) as typeof snapshot;
+      const parsed = parseYaml(written) as typeof snapshot;
       const cached = memoryStore.getLatestContextSnapshot(projectPath);
 
       expect(parsed.currentTask).toBe("Build durable context layer");
       expect(parsed.recentMemory[0]?.summary).toBe("Added get_context");
       expect(parsed.contextFilePath).toBe(contextFilePath);
-      expect(cached?.snapshotJson).toContain("Build durable context layer");
+      expect(parsed.project.name).toBe("repo");
+      expect(cached?.snapshotText).toContain("Build durable context layer");
+      expect(cached?.format).toBe("yaml");
     } finally {
       memoryStore.close();
     }
@@ -79,6 +83,26 @@ describe("context layer", () => {
       });
 
       expect(context).toContain("Cached context note");
+      expect(context).toContain("schemaVersion: 2");
+    } finally {
+      memoryStore.close();
+    }
+  });
+
+  it("supports JSON output without changing the YAML file format", async () => {
+    const memoryStore = new ProjectMemoryStore(dbPath);
+    try {
+      const context = await readContextLayer({
+        projectPath,
+        filePath: contextFilePath,
+        format: "json",
+        memoryStore
+      });
+      expect(JSON.parse(context)).toMatchObject({
+        schemaVersion: 2,
+        project: { path: projectPath }
+      });
+      expect(await readFile(contextFilePath, "utf8")).toContain("schemaVersion: 2");
     } finally {
       memoryStore.close();
     }
@@ -129,6 +153,35 @@ describe("context layer", () => {
       await writer.refresh();
 
       expect(memoryStore.getActiveProjectPath()).toBe("/active-repo");
+    } finally {
+      memoryStore.close();
+    }
+  });
+
+  it("caps noisy working-tree arrays and reports omitted files", async () => {
+    spawnSync("git", ["init"], { cwd: projectPath });
+    await mkdir(join(projectPath, "src"), { recursive: true });
+    for (let index = 0; index < 15; index += 1) {
+      await writeFile(
+        join(projectPath, "src", `file-${index}.ts`),
+        `export const value${index} = ${index};\n`,
+        "utf8"
+      );
+    }
+
+    const memoryStore = new ProjectMemoryStore(dbPath);
+    try {
+      const writer = new ContextLayerWriter({
+        projectPath,
+        filePath: contextFilePath,
+        memoryStore
+      });
+      const snapshot = await writer.refresh();
+
+      expect(snapshot.workingTree.totalChangedFiles).toBe(16);
+      expect(snapshot.workingTree.changedFiles).toHaveLength(10);
+      expect(snapshot.workingTree.omittedFiles).toBe(6);
+      expect(snapshot.workingTree.summary).toContain("16 changed files");
     } finally {
       memoryStore.close();
     }

@@ -98,4 +98,33 @@ describe("dep graph", () => {
     expect(result.definedIn).toBe(join(commandsDir, "doctor.ts"));
     expect(result.importedBy).toContain(join(srcDir, "index.ts"));
   });
+
+  it("resolves relative and package imports in a Flutter project", async () => {
+    const flutterRoot = join(tempDir, "flutter-app");
+    const servicesDir = join(flutterRoot, "lib", "services");
+    await mkdir(servicesDir, { recursive: true });
+    await writeFile(join(flutterRoot, "pubspec.yaml"), "name: sample_app\n", "utf8");
+    await writeFile(
+      join(flutterRoot, "lib", "main.dart"),
+      "import 'package:sample_app/services/notifications.dart';\nvoid main() {}\n",
+      "utf8"
+    );
+    const notificationsPath = join(servicesDir, "notifications.dart");
+    await writeFile(
+      notificationsPath,
+      "class NotificationService {\n  void initialize() {}\n}\n",
+      "utf8"
+    );
+
+    const builder = new DepGraphBuilder(fakeClient(), sqlitePath);
+    await builder.buildGraph(flutterRoot);
+    builder.close();
+
+    const tool = new DepGraphTool({ sqlitePath, codebasePath: flutterRoot });
+    const result = tool.query("NotificationService");
+    tool.close();
+
+    expect(result.definedIn).toBe(notificationsPath);
+    expect(result.importedBy).toContain(join(flutterRoot, "lib", "main.dart"));
+  });
 });

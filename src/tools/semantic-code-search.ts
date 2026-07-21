@@ -1,11 +1,12 @@
 import { ChromaClient } from "chromadb";
+import { resolve } from "node:path";
 
 import { createChromaClient } from "../chroma.js";
 import { DEFAULT_OLLAMA_HOST } from "./query-local-docs.js";
 
 const COLLECTION_NAME = "infimium_code";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
-const SNIPPET_LENGTH = 300;
+const SKELETON_LENGTH = 300;
 
 export type CodeResult = {
   name: string;
@@ -23,6 +24,7 @@ type CodeMetadata = {
   lineStart?: unknown;
   lineEnd?: unknown;
   language?: unknown;
+  signature?: unknown;
 };
 
 type QueryResultLike = {
@@ -35,7 +37,9 @@ type QueryArgs = {
   queryEmbeddings: number[][];
   nResults: number;
   include: Array<"documents" | "metadatas" | "distances">;
-  where?: { language: { $eq: string } };
+  where?:
+    | { projectPath: { $eq: string } }
+    | { $and: Array<{ projectPath: { $eq: string } } | { language: { $eq: string } }> };
 };
 
 type CollectionLike = {
@@ -80,7 +84,7 @@ export class CodeSearchTool {
   private readonly chromaClient: ChromaClientLike;
 
   constructor(options: CodeSearchOptions) {
-    this.codebasePath = options.codebasePath;
+    this.codebasePath = options.codebasePath ? resolve(options.codebasePath) : null;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
     this.chromaClient = options.chromaClient ?? createChromaClient();
   }
@@ -90,14 +94,15 @@ export class CodeSearchTool {
     language?: string,
     topK: number = 5
   ): Promise<CodeResult[]> {
-    if (!this.codebasePath) {
+    const codebasePath = this.codebasePath;
+    if (!codebasePath) {
       throw new CodeSearchNotConfiguredError();
     }
 
     const collection = await this.getCollection();
     const queryEmbedding = await this.embedQuery(query);
 
-    return this.queryCollection(collection, queryEmbedding, language, topK);
+    return this.queryCollection(collection, queryEmbedding, language, topK, codebasePath);
   }
 
   private async getCollection(): Promise<CollectionLike> {
@@ -119,7 +124,8 @@ export class CodeSearchTool {
     collection: CollectionLike,
     queryEmbedding: number[],
     language: string | undefined,
-    topK: number
+    topK: number,
+    projectPath: string
   ): Promise<CodeResult[]> {
     try {
       const count = await collection.count();
@@ -130,10 +136,16 @@ export class CodeSearchTool {
       const queryArgs: QueryArgs = {
         queryEmbeddings: [queryEmbedding],
         nResults: topK,
-        include: ["documents", "metadatas", "distances"]
+        include: ["documents", "metadatas", "distances"],
+        where: { projectPath: { $eq: projectPath } }
       };
       if (language) {
-        queryArgs.where = { language: { $eq: language } };
+        queryArgs.where = {
+          $and: [
+            { projectPath: { $eq: projectPath } },
+            { language: { $eq: language } }
+          ]
+        };
       }
 
       return parseQueryResults(await collection.query(queryArgs));
@@ -193,11 +205,25 @@ function parseQueryResults(result: QueryResultLike): CodeResult[] {
     parsed.push({
       ...parsedMetadata,
       score: distanceToScore(distances[index] ?? 1),
-      snippet: bodyText.slice(0, SNIPPET_LENGTH)
+      snippet: buildSkeleton(bodyText, metadata.signature)
     });
   }
 
   return parsed.sort((a, b) => b.score - a.score);
+}
+
+function buildSkeleton(bodyText: string, signature: unknown): string {
+  if (typeof signature === "string" && signature.trim()) {
+    return truncate(signature.trim(), SKELETON_LENGTH);
+  }
+
+  const bodyStart = bodyText.search(/\{|=>|:\s*(?:\n|$)/);
+  const candidate = bodyStart > 0 ? bodyText.slice(0, bodyStart) : bodyText.split("\n", 1)[0] ?? bodyText;
+  return truncate(candidate.replace(/\s+/g, " ").trim(), SKELETON_LENGTH);
+}
+
+function truncate(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit - 1).trimEnd()}…`;
 }
 
 function parseMetadata(metadata: CodeMetadata): Omit<CodeResult, "score" | "snippet"> | null {
