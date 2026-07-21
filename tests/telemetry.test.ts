@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,8 @@ import {
   trackSetupCompleted,
   trackTelemetry
 } from "../src/telemetry.js";
+
+const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
 
 describe("telemetry", () => {
   let tempDir: string;
@@ -52,7 +55,7 @@ describe("telemetry", () => {
     expect(body.distinct_id).toMatch(/[0-9a-f-]{36}/);
     expect(body.properties).toMatchObject({
       telemetry_version: 1,
-      infimium_version: "0.4.1",
+      infimium_version: packageJson.version,
       source: "doctor"
     });
     expect(JSON.stringify(body)).not.toContain("/Users/");
@@ -87,6 +90,44 @@ describe("telemetry", () => {
     };
     expect(record.setupCompletedTracked).toBe(true);
     expect(record.firstToolCallTracked).toBe(true);
+  });
+
+  it("deduplicates concurrent first_tool_call events", async () => {
+    await Promise.all([
+      trackFirstToolCall("get_context", { installPath }),
+      trackFirstToolCall("semantic_code_search", { installPath }),
+      trackFirstToolCall("dep_graph", { installPath }),
+      trackFirstToolCall("query_local_docs", { installPath })
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as {
+      event: string;
+      properties: Record<string, unknown>;
+    };
+    expect(body.event).toBe("first_tool_call");
+    expect(body.properties.$insert_id).toMatch(/:first_tool_call$/);
+  });
+
+  it("keeps one install id during concurrent record creation", async () => {
+    await Promise.all([
+      trackTelemetry("serve_started", {}, { installPath }),
+      trackTelemetry("doctor_run", {}, { installPath }),
+      trackTelemetry("index_started", {}, { installPath }),
+      trackTelemetry("playground_opened", {}, { installPath })
+    ]);
+
+    const distinctIds = new Set(
+      fetchMock.mock.calls.map((call) => {
+        const init = call[1] as RequestInit;
+        const body = JSON.parse(String(init.body)) as { distinct_id: string };
+        return body.distinct_id;
+      })
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(distinctIds.size).toBe(1);
   });
 
   it("reports telemetry status without exposing the PostHog key", async () => {
