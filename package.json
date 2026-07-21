@@ -1,21 +1,72 @@
 {
   "name": "infimium",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.1.6",
+  "description": "Private context layer MCP for AI agents.",
+  "private": false,
+  "mcpName": "io.github.aryankumar06/infimium",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/infimium-ai/infimium-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/infimium-ai/infimium-agent/issues"
+  },
+  "homepage": "https://github.com/infimium-ai/infimium-agent#readme",
+  "bin": {
+    "infimium": "dist/src/index.js"
+  },
+  "files": [
+    "dist/src",
+    "examples",
+    "server.json",
+    "public/infimium-logo.png",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "start": "tsx src/index.ts",
-    "test": "vitest",
-    "build": "tsc"
+    "index": "tsx src/index.ts index",
+    "watch": "tsx src/index.ts watch",
+    "hello": "tsx src/index.ts hello",
+    "search": "tsx src/index.ts search",
+    "fetch": "tsx src/index.ts fetch",
+    "code-search": "tsx src/index.ts code-search",
+    "docs-search": "tsx src/index.ts docs-search",
+    "dep-graph": "tsx src/index.ts dep-graph",
+    "get-context": "tsx src/index.ts get-context",
+    "resume": "tsx src/index.ts resume",
+    "remember": "tsx src/index.ts remember",
+    "status": "tsx src/index.ts status",
+    "doctor": "tsx src/index.ts doctor",
+    "plan": "tsx src/index.ts plan",
+    "test": "vitest run",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "cheerio": "^1.0.0",
+    "chromadb": "^3.5.0",
     "dotenv": "^16.4.5",
+    "glob": "^13.0.6",
+    "pdf-parse": "^2.4.5",
+    "tree-sitter": "0.21.1",
+    "tree-sitter-javascript": "0.21.4",
+    "tree-sitter-python": "0.21.0",
+    "tree-sitter-typescript": "0.23.2",
+    "tsx": "^4.19.2",
+    "turndown": "^7.2.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
-    "tsx": "^4.19.2",
+    "@types/turndown": "^5.0.5",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

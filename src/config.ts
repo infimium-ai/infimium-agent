@@ -4,16 +4,18 @@ loadDotenv();
 
 export interface Config {
   searchApiKey: string;
-  searchProvider: "brave" | "serp";
+  searchProvider: "tinyfish" | "brave" | "serp";
   localDocsPath: string | null;
   codebasePath: string | null;
+  ollamaHost: string;
   shellAllowlist: string[];
 }
 
-function readRequiredEnv(
-  env: NodeJS.ProcessEnv,
-  key: "SEARCH_API_KEY"
-): string {
+type LoadConfigOptions = {
+  requireSearchApiKey?: boolean;
+};
+
+function readRequiredEnv(env: NodeJS.ProcessEnv, key: "SEARCH_API_KEY"): string {
   const value = env[key]?.trim();
 
   if (!value) {
@@ -23,12 +25,22 @@ function readRequiredEnv(
   return value;
 }
 
-function readSearchProvider(
-  env: NodeJS.ProcessEnv
-): Config["searchProvider"] {
+function readSearchApiKey(env: NodeJS.ProcessEnv, required: boolean): string {
+  if (required) {
+    return readRequiredEnv(env, "SEARCH_API_KEY");
+  }
+
+  return env.SEARCH_API_KEY?.trim() ?? "";
+}
+
+function readSearchProvider(env: NodeJS.ProcessEnv): Config["searchProvider"] {
   const value = env.SEARCH_PROVIDER?.trim();
 
-  if (!value || value === "brave") {
+  if (!value || value === "tinyfish") {
+    return "tinyfish";
+  }
+
+  if (value === "brave") {
     return "brave";
   }
 
@@ -36,7 +48,7 @@ function readSearchProvider(
     return "serp";
   }
 
-  throw new Error('Invalid SEARCH_PROVIDER. Expected "brave" or "serp".');
+  throw new Error('Invalid SEARCH_PROVIDER. Expected "tinyfish", "brave", or "serp".');
 }
 
 function readOptionalPath(
@@ -55,15 +67,25 @@ function readShellAllowlist(env: NodeJS.ProcessEnv): string[] {
     return [];
   }
 
-  return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
-export function loadConfig(): Config {
+function readOllamaHost(env: NodeJS.ProcessEnv): string {
+  return env.OLLAMA_HOST?.trim() || "http://localhost:11434";
+}
+
+export function loadConfig(options: LoadConfigOptions = {}): Config {
+  const requireSearchApiKey = options.requireSearchApiKey ?? true;
+
   return {
-    searchApiKey: readRequiredEnv(process.env, "SEARCH_API_KEY"),
+    searchApiKey: readSearchApiKey(process.env, requireSearchApiKey),
     searchProvider: readSearchProvider(process.env),
     localDocsPath: readOptionalPath(process.env, "LOCAL_DOCS_PATH"),
     codebasePath: readOptionalPath(process.env, "CODEBASE_PATH"),
+    ollamaHost: readOllamaHost(process.env),
     shellAllowlist: readShellAllowlist(process.env)
   };
 }

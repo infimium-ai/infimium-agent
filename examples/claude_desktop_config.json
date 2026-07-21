@@ -1,19 +1,20 @@
 {
   "mcpServers": {
     "infimium": {
-      "command": "npx",
+      "command": "docker",
       "args": [
-        "tsx",
-        "src/index.ts"
-      ],
-      "cwd": "/absolute/path/to/infimium",
-      "env": {
-        "SEARCH_API_KEY": "",
-        "SEARCH_PROVIDER": "brave",
-        "LOCAL_DOCS_PATH": "",
-        "CODEBASE_PATH": "",
-        "SHELL_ALLOWLIST": "ls,git,npm,npx"
-      }
+        "compose",
+        "-f",
+        "/absolute/path/to/infimium-agent/docker-compose.yml",
+        "run",
+        "--rm",
+        "-T",
+        "infimium",
+        "npm",
+        "start",
+        "--",
+        "serve"
+      ]
     }
   }
 }

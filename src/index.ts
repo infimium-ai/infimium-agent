@@ -1,17 +1,127 @@
-import { createInfimiumServer } from "./server.js";
+#!/usr/bin/env node
 
-async function main() {
-  const server = createInfimiumServer();
-  const info = await server.start();
+import { initEnv } from "./cli/init.js";
+import { runIndexCommand } from "./cli/index-cmd.js";
+import { runStatusCommand } from "./cli/status-cmd.js";
+import { runWatchCommand } from "./cli/watch-cmd.js";
+import { runCodeSearchCommand } from "./commands/code-search.js";
+import { runDepGraphCommand } from "./commands/dep-graph.js";
+import { runDoctorCommand } from "./commands/doctor.js";
+import { runDocsSearchCommand } from "./commands/docs-search.js";
+import { runFetchCommand } from "./commands/fetch.js";
+import {
+  runGetContextCommand,
+  runMemoryCommand,
+  runRememberCommand,
+  runResumeCommand
+} from "./commands/memory.js";
+import { runPlanCommand } from "./commands/plan.js";
+import { runSearchCommand } from "./commands/search.js";
+import { startServer } from "./server.js";
 
-  console.log(
-    `Infimium initialized with ${info.toolCount} tools (${server.tools
-      .map((tool) => tool.name)
-      .join(", ")}).`
-  );
+async function main(): Promise<void> {
+  const command = process.argv[2] ?? "serve";
+  const args = process.argv.slice(3);
+
+  if (command === "init") {
+    await initEnv();
+    return;
+  }
+
+  if (command === "index") {
+    await runIndexCommand();
+    return;
+  }
+
+  if (command === "watch" || command === "watch-index" || command === "auto-index") {
+    await runWatchCommand(args);
+    return;
+  }
+
+  if (command === "status") {
+    await runStatusCommand();
+    return;
+  }
+
+  if (command === "hello" || command === "hello-infimium" || command === "hello_infimium") {
+    console.log("hey-dude");
+    return;
+  }
+
+  if (command === "search") {
+    await runSearchCommand(args);
+    return;
+  }
+
+  if (command === "fetch" || command === "fetch-url" || command === "fetch_url") {
+    await runFetchCommand(args);
+    return;
+  }
+
+  if (
+    command === "code-search" ||
+    command === "semantic-code-search" ||
+    command === "semantic_code_search"
+  ) {
+    await runCodeSearchCommand(args);
+    return;
+  }
+
+  if (
+    command === "docs-search" ||
+    command === "query-local-docs" ||
+    command === "query_local_docs"
+  ) {
+    await runDocsSearchCommand(args);
+    return;
+  }
+
+  if (command === "dep-graph" || command === "dep_graph") {
+    await runDepGraphCommand(args);
+    return;
+  }
+
+  if (command === "resume") {
+    await runResumeCommand(args);
+    return;
+  }
+
+  if (command === "get-context" || command === "get_context") {
+    await runGetContextCommand(args);
+    return;
+  }
+
+  if (command === "remember") {
+    await runRememberCommand(args);
+    return;
+  }
+
+  if (command === "memory") {
+    await runMemoryCommand(command, args);
+    return;
+  }
+
+  if (command === "doctor") {
+    await runDoctorCommand();
+    return;
+  }
+
+  if (command === "plan") {
+    await runPlanCommand(args);
+    return;
+  }
+
+  if (command === "serve") {
+    console.error("Infimium MCP server running...");
+    await startServer();
+    return;
+  }
+
+  throw new Error(`Unknown command: ${command}`);
 }
 
 main().catch((error: unknown) => {
-  console.error("Failed to start Infimium:", error);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`Failed to start Infimium: ${message}`);
   process.exitCode = 1;
 });

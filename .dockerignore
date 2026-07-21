@@ -1,0 +1,9 @@
+node_modules
+.git
+.env
+dist
+*.db
+chroma_db/
+infimium_docs.db
+infimium_code.db
+infimium.db

@@ -1,375 +1,237 @@
-<div align="center">
+<p align="center">
+  <img src="public/infimium-logo.png" alt="Infimium" width="110" />
+</p>
 
-<img src="public/infimium_logo.png" alt="infimium.ai" width="120" height="120"/>
+# Infimium
 
-# infimium
+Private context layer for AI agents. Web search, local docs, semantic code search, dependency graph, memory, and planning from one MCP server on your machine.
 
-**Private search infrastructure for AI agents.**
+[![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
+[![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
-Web search · Local RAG · Semantic code search · Dependency graph  
-One self-hostable MCP server. Runs inside your firewall. Zero data egress.
+## Demo
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-6366f1.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/Python-3.11+-6366f1?logo=python&logoColor=white)](https://python.org)
-[![MCP](https://img.shields.io/badge/MCP-compatible-6366f1)](https://modelcontextprotocol.io)
-[![Discord](https://img.shields.io/badge/Discord-Join-6366f1?logo=discord&logoColor=white)](https://discord.gg/infimium)
-[![Stars](https://img.shields.io/github/stars/infimium-ai/infimium?color=6366f1)](https://github.com/infimium-ai/infimium/stargazers)
+[![Infimium demo](docs/assets/infimium-demo.gif)](docs/assets/infimium-demo.mp4)
 
-[Website](https://infimium.ai) · [Docs](https://infimium.ai/docs) · [Discord](https://discord.gg/infimium) · [Join Waitlist](https://infimium.ai/#waitlist)
+[Watch the full demo video](docs/assets/infimium-demo.mp4)
 
----
+## Why
 
-![infimium demo](public/demo.gif)
+Agents lose context when repos get big. They either read too much, burn tokens, or miss the real function because keyword search is not enough.
 
-</div>
+```text
+200,000 lines of code
+Agent reads everything -> context blown + expensive
+grep "price calculation" -> misses calcPropertyValue()
+```
 
----
+With Infimium, the agent asks targeted tools first:
 
-## What is infimium?
+```text
+tool: semantic_code_search
+query: "price calculation logic"
 
-AI agents need to search — the web, your docs, and your codebase. Today that means stitching together 3–5 different APIs, all of which send your data to the cloud.
+-> services/property/calc.ts:142 · calcPropertyValue()
+-> imported by: listing.ts, tax.ts, pdf-generator.ts, calc.test.ts
+```
 
-**infimium is one MCP server that does all of it, locally.**
+## What Works Now
+
+- MCP server with 10 tools.
+- CLI for the same tools.
+- Local code/doc indexing with Ollama + ChromaDB.
+- Dependency graph from imports.
+- Auto-index while the MCP server runs.
+- Project memory across chats, agents, and IDEs.
+- Compact context handoff file at `context/layer.md`.
+- Setup checker with copy-paste fixes: `npx infimium doctor`.
+
+## Quick Start
+
+Beginner path: install Docker, then run one command.
 
 ```bash
-# Connect once in your claude_desktop_config.json or cursor settings
-# Then your agent can call:
-
-infimium_search("latest HTTP/3 spec changes")          # web search + cited context
-infimium_fetch("https://docs.stripe.com/api")          # clean text from any URL  
-infimium_query_docs("onboarding flow", ns="internal")  # local doc RAG
-infimium_code_search("price calculation logic")         # semantic code search ⭐
-infimium_deps("services/property/calc.js")             # dependency graph ⭐
-infimium_understand("what does this codebase do?")     # full codebase map ⭐
-infimium_shell(cmd="ripgrep", pattern="TODO")          # shell tools
+git clone https://github.com/infimium-ai/infimium-agent.git
+cd infimium-agent
+./scripts/setup.sh
 ```
 
-Everything runs on your machine. Your code, your docs, and your embeddings **never leave your infrastructure.**
+This creates `.env`, starts ChromaDB/Ollama, pulls `nomic-embed-text`, indexes the repo, and prints MCP config.
 
----
+Optional web search:
 
-## The problem we solve
-
-### For AI agents
-```
-Without infimium                    With infimium
-─────────────────────────────────   ─────────────────────────────────
-Agent reads 200,000 lines           Agent calls infimium_code_search()
-→ Context limit blown               → Gets back: calc.js line 142–189
-→ Thousands of tokens wasted        → Reads 47 lines. Done.
-→ Hallucination on stale code       → Accurate. Fast. Local.
+```env
+SEARCH_PROVIDER=tinyfish
+SEARCH_API_KEY=your_tinyfish_key
 ```
 
-### For developers joining a new codebase
-```
-Without infimium                    With infimium
-─────────────────────────────────   ─────────────────────────────────
-2 weeks reading files               1 day with infimium_understand()
-Grep-ing for "price" hoping         "Feature: Property Pricing → 7 files
-  to find calcPropertyValue()         Core: services/property/calc.js
-Ask senior dev for context            calcPropertyValue() → tax + discounts"
-```
+No search key? Fine. Code search, docs search, dep graph, memory, context, fetch, shell, status, and doctor still work.
 
----
+## Connect To Cursor, Windsurf, Or Claude
 
-## Features
-
-### 🌐 Web Search
-Real-time web search via SerpAPI or Brave Search. Results are fetched, cleaned, ranked by relevance to your query, trimmed to a token budget, and returned with inline citations `[1][2]`.
-
-### 📄 URL Fetcher  
-`httpx` for static pages, `Playwright` for JS-heavy SPAs. HTML is cleaned via `trafilatura` — no nav, no ads, just the content. Per-session cache, 10s timeout.
-
-### 📚 Local Doc RAG
-Embed your markdown files, PDFs, and text documents with `sentence-transformers`. Indexed in `ChromaDB` locally. Query by semantic similarity. Fully offline. Private namespaces per team.
-
-### 🔍 Semantic Code Search ⭐
-`tree-sitter` parses your entire codebase into AST chunks (functions, classes, blocks). Each chunk is embedded with `nomic-embed-code`. Search by what code **does**, not what it's named.
-
-```
-Query: "real estate price calculation logic"
-Match: services/property/calc.js → calcPropertyValue() → line 142–189
-Confidence: 0.94
-```
-
-Works on codebases with 200,000+ lines. Query time is under 2 seconds.
-
-### 🕸️ Dependency Graph ⭐
-AST import resolution stored in SQLite. Know not just **where** the code lives but **what breaks if you change it**.
-
-```json
-{
-  "file": "services/property/calc.js",
-  "dependents": [
-    "api/routes/listing.js",
-    "utils/tax.js", 
-    "reports/pdf_generator.js",
-    "tests/calc.test.js"
-  ],
-  "dependencies": [
-    "utils/constants.js → PROPERTY_TAX_RATE"
-  ]
-}
-```
-
-### 🧠 Codebase Intelligence ⭐
-Ask infimium what a codebase does. It maps every file, summarizes every function, and groups them into features — entirely on your machine.
-
-```
-infimium_understand("what does this codebase do?")
-
-→ This is a real estate platform. 4 feature areas:
-
-  1. Property Pricing (7 files)
-     Core: services/property/calc.js
-     calcPropertyValue() → applies tax + area pricing + discounts
-
-  2. User Auth (5 files)
-     Core: auth/jwt.js — login, token refresh, RBAC
-
-  3. PDF Reports (3 files)  
-     Core: reports/pdf_generator.js — depends on pricing + property data
-
-  4. Admin Dashboard (12 files)
-     Core: pages/admin/index.js
-```
-
-New dev understands the entire codebase in one day instead of two weeks.
-
-### 🐚 Shell Tools
-Direct wrappers for `ripgrep`, `git log`, `find`. Exact pattern matching and git history lookups. Complements semantic search for precise queries.
-
----
-
-## Why not just use Tavily / Exa / Perplexity?
-
-| | Tavily | Exa | Perplexity | Cursor | **infimium** |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Web search | ✅ | ✅ | ✅ | ➖ | ✅ |
-| Local doc RAG | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Semantic code search | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Dependency graph | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Codebase intelligence | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Self-hostable | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Zero data egress | ❌ | ❌ | ❌ | ❌ | ✅ |
-| MCP native | ✅ | ✅ | ➖ | ❌ | ✅ |
-| Free tier | ➖ | ➖ | ❌ | ➖ | ✅ MIT |
-
-Tavily, Exa, and Perplexity are web-only and cloud-only. Cursor's code indexing is locked inside their editor. **infimium is the only tool that does web + code + docs in one private MCP server.**
-
----
-
-## Quickstart
-
-### 1. Install
-
-```bash
-pip install infimium
-```
-
-Or with Docker (recommended):
-
-```bash
-git clone https://github.com/infimium-ai/infimium
-cd infimium
-docker-compose up
-```
-
-### 2. Index your codebase
-
-```bash
-infimium index ./your-project
-# Parsing files... ████████████████ 2,847 files
-# Building embeddings... (one-time, ~15 mins for 200k lines)
-# Building dependency graph...
-# Done. Index stored at ~/.infimium/index.db
-```
-
-### 3. Connect to Claude Code
-
-Add to your `claude_desktop_config.json`:
+Use the config printed by `./scripts/setup.sh`, or paste this and change the path:
 
 ```json
 {
   "mcpServers": {
     "infimium": {
-      "command": "infimium",
-      "args": ["serve"],
+      "command": "npx",
+      "args": ["infimium", "serve"],
       "env": {
-        "INFIMIUM_REPO": "/path/to/your/project",
-        "INFIMIUM_DOCS": "/path/to/your/docs",
-        "SEARCH_API_KEY": "your-serpapi-or-brave-key"
+        "CODEBASE_PATH": "/absolute/path/to/your/repo",
+        "LOCAL_DOCS_PATH": "/absolute/path/to/your/repo/docs",
+        "CHROMADB_HOST": "http://localhost:8000",
+        "OLLAMA_HOST": "http://localhost:11434",
+        "SHELL_ALLOWLIST": "ls,git,pwd,npm,npx"
       }
     }
   }
 }
 ```
 
-### 4. Connect to Cursor
+Restart your IDE after editing MCP config.
 
-Add to your Cursor MCP settings:
+First prompt to test:
 
-```json
-{
-  "infimium": {
-    "command": "infimium serve --transport stdio"
-  }
-}
+```text
+Use Infimium hello_infimium.
+Use Infimium get_context before starting.
+Use Infimium semantic_code_search to explain this repo.
 ```
 
-That's it. Your agent now has web search, codebase intelligence, and local RAG.
+If the agent is in a different workspace than the MCP server, ask it to pass `project_path` once. Infimium remembers that as the active project.
 
----
+## Tools
 
-## Configuration
+| Tool | Use |
+| --- | --- |
+| `hello_infimium` | Health check. Returns `hey-dude`. |
+| `web_search` | Tinyfish web search. Requires `SEARCH_API_KEY`. |
+| `fetch_url` | Fetch a URL and extract readable Markdown/text. |
+| `query_local_docs` | Search indexed `.md`, `.txt`, `.html`, and `.pdf` docs. |
+| `semantic_code_search` | Search code by meaning using tree-sitter symbols + local embeddings. |
+| `dep_graph` | Find where a symbol is defined, who imports it, and what it imports. |
+| `shell` | Run allowlisted shell commands with timeout and output caps. |
+| `plan` | Build a grounded implementation plan from code search + dep graph context. |
+| `project_memory` | Save or resume task notes across chats and IDEs. |
+| `get_context` | Return compact repo context: task, memory, index health, git changes, touched files. |
 
-```toml
-# infimium.toml
+## CLI
 
-[core]
-model = "ollama/llama3.2"        # local model via Ollama
-transport = "stdio"              # stdio | sse
-port = 8765                      # for SSE transport
-
-[search]
-provider = "brave"               # brave | serpapi
-api_key = "your-key-here"
-max_results = 10
-depth = "standard"               # standard | deep
-
-[code]
-repo_path = "./src"
-languages = ["python", "typescript", "go", "rust"]
-embed_model = "nomic-embed-code"
-index_path = "~/.infimium/index.db"
-watch = true                     # auto re-index on file change
-
-[rag]
-docs_path = "./docs"
-namespace = "default"
-embed_model = "sentence-transformers/all-MiniLM-L6-v2"
-chunk_size = 512
-chunk_overlap = 64
-
-[context]
-token_budget = 12000             # max tokens sent to LLM
-rerank = true                    # hybrid BM25 + vector reranking
+```bash
+npx infimium doctor
+npx infimium status
+npx infimium index
+npx infimium watch
+npx infimium hello
+npx infimium search "latest MCP registry news"
+npx infimium fetch https://example.com
+npx infimium code-search "context layer writer"
+npx infimium docs-search "setup"
+npx infimium dep-graph startServer
+npx infimium plan --dry-run "add rate limiting"
+npx infimium remember "Finished setup" --type progress --task "Launch prep"
+npx infimium resume
+npx infimium get-context
 ```
 
----
+Check health:
 
-## Architecture
-
-```
-MCP Clients (Claude Code · Cursor · Windsurf · custom agents)
-        │
-        │  MCP protocol (stdio / SSE)
-        ▼
-┌───────────────────────────────────────────────────────┐
-│                  Infimium MCP Server                  │
-│         7 tools exposed as MCP endpoints              │
-└───────────────────────┬───────────────────────────────┘
-                        │
-                        ▼
-┌───────────────────────────────────────────────────────┐
-│                    Orchestrator                       │
-│     Intent parse · Query plan · Tool dispatch         │
-│     Context builder · Token budget · Citations        │
-└──┬──────────┬──────────┬──────────┬──────────┬────────┘
-   │          │          │          │          │
-   ▼          ▼          ▼          ▼          ▼
-Web        URL        Local      Code      Dep
-Search    Fetcher      RAG      Search    Graph
-SerpAPI   httpx/    ChromaDB  tree-sitter SQLite
-/Brave    Playwright sentence-  nomic-    AST
-          trafilatr  transformr  embed    imports
-                        │          │         │
-                        └──────────┴─────────┘
-                                   │
-                              ~/.infimium/
-                              (all local)
+```bash
+npx infimium doctor
 ```
 
----
+Expected shape:
 
-## Security
+```text
+1. ✅ Node/npm version
+2. ✅ Ollama
+3. ✅ Required embedding model
+4. ✅ ChromaDB
+5. ✅ Config/env
+6. ✅ Index status
+Summary: 6/6 checks passed
+```
 
-infimium is built privacy-first. Here's exactly what leaves your machine:
+## Manual Local Setup
 
-| Data | Leaves machine? |
-|---|---|
-| Your source code | ❌ Never |
-| Code embeddings | ❌ Never |
-| Dependency graph | ❌ Never |
-| Local documents | ❌ Never |
-| Doc embeddings | ❌ Never |
-| Web search query | ✅ Query string only (anonymised) |
-| Fetched URL content | ❌ Never — goes directly to agent |
+Use this only if Docker setup fails.
 
-**infimium never stores, logs, or transmits your private code or documents.**
+```bash
+npm install
+cp .env.example .env
+docker compose up -d chromadb
+ollama serve
+ollama pull nomic-embed-text
+npm run build
+npx infimium index
+npx infimium doctor
+```
 
-This is why infimium is the only option for teams in banking, healthtech, defence, and govtech — cloud-only competitors are legally blocked from those customers.
+Minimal `.env`:
 
----
+```env
+SEARCH_PROVIDER=tinyfish
+SEARCH_API_KEY=
+LOCAL_DOCS_PATH=./docs
+CODEBASE_PATH=.
+SHELL_ALLOWLIST=ls,git,pwd,npm,npx
+OLLAMA_HOST=http://localhost:11434
+CHROMADB_HOST=http://localhost:8000
+INFIMIUM_AUTO_INDEX=true
+```
 
-## Roadmap
+## If Setup Fails
 
-- [x] Web search + URL fetcher
-- [x] Local doc RAG
-- [x] MCP server (stdio + SSE)
-- [ ] Semantic code search (Python, TypeScript, Go)
-- [ ] Dependency graph
-- [ ] Codebase intelligence (`infimium_understand()`)
-- [ ] File watcher (auto re-index on change)
-- [ ] More language grammars (Rust, Java, Dart)
-- [ ] Notion / Confluence as RAG sources
-- [ ] Team namespaces
-- [ ] infimium.ai hosted cloud tier
+Paste this into Cursor, Claude Code, Codex, or any coding agent:
 
----
+```text
+Set up Infimium in this repo.
+
+Run ./scripts/setup.sh. If it fails, fix the missing dependency.
+Make .env exist.
+Start ChromaDB.
+Start Ollama.
+Pull nomic-embed-text.
+Run npx infimium index.
+Run npx infimium doctor and make all 6 checks pass.
+Show me the MCP JSON for this machine.
+Do not commit secrets.
+```
+
+## How The Context Layer Works
+
+Infimium indexes your repo into:
+
+- SQLite: index metadata, project memory, dependency graph.
+- ChromaDB: local vector search over docs and code symbols.
+- `context/layer.md`: compact JSON handoff for new agents.
+
+When `infimium serve` is running, it refreshes context every 5 minutes and auto-indexes changed files. A fresh agent should call `get_context` first, then use `semantic_code_search`, `dep_graph`, and `query_local_docs` before editing.
+
+## Privacy
+
+Self-hosted means your code index, embeddings, docs, dependency graph, and memory stay on your machine.
+
+- Embeddings run locally with Ollama.
+- ChromaDB and SQLite run locally.
+- Web search only sends the search query to your configured provider.
+- Telemetry is off unless configured in a future release.
+
+## Paid Hosted Glimpse
+
+Self-host is free forever under MIT.
+
+Hosted Infimium will focus on:
+
+- managed indexing for teams,
+- shared project memory,
+- larger repo indexing workers,
+- team dashboards for index health and tool usage.
 
 ## Contributing
 
-infimium is MIT licensed and built in public. Contributions welcome.
+[CONTRIBUTING.md](CONTRIBUTING.md)
 
-```bash
-git clone https://github.com/infimium-ai/infimium
-cd infimium
-pip install -e ".[dev]"
-pre-commit install
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.  
-Join the [Discord](https://discord.gg/infimium) to discuss ideas and get help.
-
----
-
-## Self-hosting vs infimium.ai
-
-| | Self-host (free) | [infimium.ai](https://infimium.ai) Pro |
-|---|---|---|
-| All 7 MCP tools | ✅ | ✅ |
-| Local Ollama models | ✅ | ✅ |
-| Web searches/day | 50 | Unlimited |
-| Hosted MCP endpoint | ❌ | ✅ |
-| Uptime SLA | ❌ | ✅ |
-| Team namespaces | ❌ | ✅ |
-| Cloud model routing | ❌ | ✅ |
-| Support | Community | Priority |
-| Price | Free | $12/mo |
-
-[Join the waitlist →](https://infimium.ai/#waitlist)
-
----
-
-## License
-
-MIT © [infimium-ai](https://github.com/infimium-ai)
-
----
-
-<div align="center">
-
-Built by [@aryankumar06](https://github.com/aryankumar06) · [infimium.ai](https://infimium.ai) · [Star us ⭐](https://github.com/infimium-ai/infimium)
-
-</div>
+Adding a new language? Start there.
