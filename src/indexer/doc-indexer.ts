@@ -303,6 +303,9 @@ export class DocIndexer {
     if (!this.db) {
       this.db = new DatabaseSync(this.sqlitePath);
       this.db.exec(`
+        PRAGMA journal_mode = WAL;
+        PRAGMA busy_timeout = 30000;
+
         CREATE TABLE IF NOT EXISTS indexed_docs (
           file_path TEXT PRIMARY KEY,
           indexed_at INTEGER,

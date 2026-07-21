@@ -1,18 +1,10 @@
 {
   "mcpServers": {
     "infimium": {
-      "command": "docker",
+      "command": "npx",
       "args": [
-        "compose",
-        "-f",
-        "/absolute/path/to/infimium-agent/docker-compose.yml",
-        "run",
-        "--rm",
-        "-T",
+        "-y",
         "infimium",
-        "npm",
-        "start",
-        "--",
         "serve"
       ]
     }

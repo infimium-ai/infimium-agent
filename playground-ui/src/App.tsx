@@ -19,18 +19,10 @@ import {
   X
 } from "lucide-react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
 
 type ViewId = "pulse" | "graph" | "index" | "economics";
 type ThemeMode = "dark" | "light";
+type RetrievalStrategy = "Full Implementation Text" | "Semantic Chunks" | "Infimium AST Skeletons";
 
 type NavigationItem = {
   id: ViewId;
@@ -154,8 +146,21 @@ type LogFeed = {
 
 type PlaygroundScope = {
   mode: "single-project" | "watched-projects" | "workspace";
+  activeWorkspaceId: string | null;
   workspaceName: string | null;
   activeProjectPath: string;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    active: boolean;
+    projects: Array<{
+      id: string;
+      name: string;
+      path: string;
+      role: string | null;
+      active: boolean;
+    }>;
+  }>;
   projects: Array<{
     id: string;
     name: string;
@@ -194,21 +199,50 @@ function cssVariable(name: string, fallback: string): string {
 
 export function App() {
   const [activeView, setActiveView] = useState<ViewId>("pulse");
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [selectedProjectPath, setSelectedProjectPath] = useState("");
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const scope = useApi<PlaygroundScope>("/api/scope");
-  const selectedProject = scope.data?.projects.find(
+  const availableWorkspaces = scope.data?.workspaces.length
+    ? scope.data.workspaces
+    : scope.data
+      ? [{
+        id: "default",
+        name: scope.data.workspaceName ?? "Local projects",
+        active: true,
+        projects: scope.data.projects
+      }]
+      : [];
+  const selectedWorkspace =
+    availableWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId) ??
+    availableWorkspaces.find((workspace) => workspace.active) ??
+    availableWorkspaces[0];
+  const selectedProject = selectedWorkspace?.projects.find(
     (project) => project.path === selectedProjectPath
-  ) ?? scope.data?.projects.find((project) => project.active) ?? scope.data?.projects[0];
+  ) ?? selectedWorkspace?.projects.find((project) => project.active) ?? selectedWorkspace?.projects[0];
   const projectPath = selectedProject?.path ?? "";
   const health = useApi<Health>(withProject("/api/health", projectPath));
   const active = viewCopy[activeView];
   const databaseOnline = health.data?.sqlite ?? false;
 
   useEffect(() => {
-    if (!scope.data || selectedProjectPath) return;
-    setSelectedProjectPath(scope.data.activeProjectPath);
-  }, [scope.data, selectedProjectPath]);
+    if (!scope.data || selectedWorkspaceId) return;
+    setSelectedWorkspaceId(scope.data.activeWorkspaceId ?? availableWorkspaces[0]?.id ?? "");
+  }, [availableWorkspaces, scope.data, selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!selectedWorkspace) return;
+    const currentProjectExists = selectedWorkspace.projects.some(
+      (project) => project.path === selectedProjectPath
+    );
+    if (currentProjectExists) return;
+    setSelectedProjectPath(
+      selectedWorkspace.projects.find((project) => project.active)?.path ??
+      selectedWorkspace.projects[0]?.path ??
+      scope.data?.activeProjectPath ??
+      ""
+    );
+  }, [scope.data?.activeProjectPath, selectedProjectPath, selectedWorkspace]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -274,15 +308,39 @@ export function App() {
             >
               {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-            {scope.data && selectedProject ? (
+            {availableWorkspaces.length > 1 ? (
+              <label className="workspace-picker">
+                <span>{availableWorkspaces.length} WORKSPACE{availableWorkspaces.length === 1 ? "" : "S"}</span>
+                <select
+                  aria-label="Active workspace"
+                  value={selectedWorkspace?.id ?? ""}
+                  onChange={(event) => {
+                    const nextWorkspace = availableWorkspaces.find(
+                      (workspace) => workspace.id === event.target.value
+                    );
+                    setSelectedWorkspaceId(event.target.value);
+                    setSelectedProjectPath(
+                      nextWorkspace?.projects.find((project) => project.active)?.path ??
+                      nextWorkspace?.projects[0]?.path ??
+                      ""
+                    );
+                  }}
+                >
+                  {availableWorkspaces.map((workspace) => (
+                    <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {selectedWorkspace && selectedProject ? (
               <label className="project-picker">
-                <span>{scope.data.projects.length} WATCHED PROJECT{scope.data.projects.length === 1 ? "" : "S"}</span>
+                <span>{selectedWorkspace.projects.length} PROJECT{selectedWorkspace.projects.length === 1 ? "" : "S"}</span>
                 <select
                   aria-label="Active project context"
                   value={selectedProject.path}
                   onChange={(event) => setSelectedProjectPath(event.target.value)}
                 >
-                  {scope.data.projects.map((project) => (
+                  {selectedWorkspace.projects.map((project) => (
                     <option key={project.id} value={project.path}>{project.name}</option>
                   ))}
                 </select>
@@ -299,8 +357,11 @@ export function App() {
         <section className="content-grid" aria-live="polite">
           {activeView === "pulse" ? <PulseView projectPath={projectPath} /> : null}
           {activeView === "graph" ? <GraphView projectPath={projectPath} theme={theme} /> : null}
-          {activeView === "index" && scope.data ? (
-            <IndexView projectPath={projectPath} scopeData={scope.data} />
+          {activeView === "index" && scope.data && selectedWorkspace ? (
+            <IndexView
+              projectPath={projectPath}
+              scopeData={scopeForSelectedWorkspace(scope.data, selectedWorkspace, projectPath)}
+            />
           ) : null}
           {activeView === "economics" ? <EconomicsView projectPath={projectPath} /> : null}
         </section>
@@ -372,6 +433,31 @@ function PulseView({ projectPath }: { projectPath: string }) {
       </article>
     </>
   );
+}
+
+function scopeForSelectedWorkspace(
+  scope: PlaygroundScope,
+  workspace: PlaygroundScope["workspaces"][number],
+  projectPath: string
+): PlaygroundScope {
+  return {
+    ...scope,
+    activeWorkspaceId: workspace.id,
+    workspaceName: workspace.name,
+    activeProjectPath: projectPath,
+    projects: workspace.projects.map((project) => ({
+      ...project,
+      active: project.path === projectPath
+    })),
+    workspaces: scope.workspaces.map((candidate) => ({
+      ...candidate,
+      active: candidate.id === workspace.id,
+      projects: candidate.projects.map((project) => ({
+        ...project,
+        active: candidate.id === workspace.id && project.path === projectPath
+      }))
+    }))
+  };
 }
 
 function GraphView({ projectPath, theme }: { projectPath: string; theme: ThemeMode }) {
@@ -982,27 +1068,19 @@ function EconomicsView({ projectPath }: { projectPath: string }) {
   if (metrics.loading) return <LoadingPanel label="Calculating token economics" />;
   if (metrics.error || !metrics.data) return <ErrorPanel message={metrics.error} />;
   const data = metrics.data;
-  const chartPalette = {
-    grid: cssVariable("--chart-grid", "rgba(255,255,255,0.08)"),
-    axis: cssVariable("--chart-axis", "rgba(255,255,255,0.50)"),
-    cursor: cssVariable("--signal-soft", "rgba(124,114,255,0.12)"),
-    tooltipBackground: cssVariable("--surface", "#080A0F"),
-    tooltipBorder: cssVariable("--line-bright", "rgba(124,114,255,0.46)")
-  };
-  const chartData = [
-    { strategy: "AST-first", tokens: data.astFirstTokens },
-    { strategy: "Full text", tokens: data.fullTextTokens }
-  ];
   const payloadReduction = data.averageFullTextTokens > 0
     ? ((1 - data.averageSkeletonTokens / data.averageFullTextTokens) * 100).toFixed(1)
     : "0.0";
+  const observedLabel = data.observedAverageFullTextTokens > 0
+    ? `${formatNumber(data.observedAverageFullTextTokens)} -> ${formatNumber(data.observedAverageSkeletonTokens)}`
+    : "--";
 
   return (
     <>
       <article className="panel panel-wide payload-proof">
         <div className="payload-proof-copy">
-          <p className="panel-label">INITIAL PAYLOAD PER SYMBOL</p>
-          <p>Signatures first. Full code only through `expand_symbol`.</p>
+          <p className="panel-label">REFERENCE PAYLOAD</p>
+          <p>Infimium sends a symbol skeleton first. Full code stays local until `expand_symbol` is requested.</p>
         </div>
         <div className="payload-equation" aria-label={`${data.averageFullTextTokens} tokens reduced to ${data.averageSkeletonTokens} tokens per symbol`}>
           <div>
@@ -1024,53 +1102,171 @@ function EconomicsView({ projectPath }: { projectPath: string }) {
       </article>
       <section className="panel-wide economics-summary" aria-label="Repository token summary">
         <div>
-          <span>INDEXED</span>
+          <span>PROJECT SYMBOLS</span>
           <strong>{formatNumber(data.symbolCount)}</strong>
-          <small>symbols</small>
+          <small>indexed locally</small>
         </div>
         <div>
-          <span>ESTIMATED SAVED</span>
+          <span>TOKENS SAVED</span>
           <strong>{compactNumber(data.totalTokensSaved)}</strong>
-          <small>tokens across this index</small>
+          <small>project estimate</small>
         </div>
         <div>
-          <span>OBSERVED HERE</span>
-          <strong>{formatNumber(data.observedAverageFullTextTokens)} -&gt; {formatNumber(data.observedAverageSkeletonTokens)}</strong>
-          <small>tokens per symbol</small>
+          <span>USD SAVED</span>
+          <strong>{formatCurrency(data.estimatedUsdSaved)}</strong>
+          <small>at ${data.usdPerMillionInputTokens}/M input tokens</small>
+        </div>
+        <div>
+          <span>OBSERVED AVG</span>
+          <strong>{observedLabel}</strong>
+          <small>full &rarr; skeleton tokens</small>
         </div>
       </section>
-      <article className="panel panel-wide economics-chart">
-        <div className="chart-heading">
-          <div><p className="panel-label">INDEX RETRIEVAL COST</p><p>Reference payload across this index</p></div>
-          <span>lower is better</span>
-        </div>
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={chartData} margin={{ top: 20, right: 10, left: 10, bottom: 0 }}>
-            <defs>
-              <linearGradient id="infimiumBar" x1="0" y1="1" x2="0" y2="0">
-                <stop offset="0%" stopColor="#5B4DF4" />
-                <stop offset="58%" stopColor="#6D5DFC" />
-                <stop offset="100%" stopColor="#9333EA" />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke={chartPalette.grid} vertical={false} />
-            <XAxis dataKey="strategy" stroke={chartPalette.axis} tickLine={false} axisLine={false} />
-            <YAxis stroke={chartPalette.axis} tickLine={false} axisLine={false} tickFormatter={compactNumber} />
-            <Tooltip
-              cursor={{ fill: chartPalette.cursor }}
-              contentStyle={{
-                background: chartPalette.tooltipBackground,
-                border: `1px solid ${chartPalette.tooltipBorder}`,
-                color: cssVariable("--text", "#FFFFFF"),
-                fontFamily: "var(--ff-mono)"
-              }}
-              formatter={(value) => [formatNumber(Number(value)), "tokens"]}
-            />
-            <Bar dataKey="tokens" fill="url(#infimiumBar)" radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </article>
+      <TokenOptimizationSimulator metrics={data} />
     </>
+  );
+}
+
+const simulatorInitialState = { contextWindow: 128000, maxRetrievals: 10 } as const;
+
+const retrievalStrategies: Array<{
+  label: RetrievalStrategy;
+  tokensPerSymbol: number;
+  tone: "danger" | "warning" | "success";
+  shortLabel: string;
+  description: string;
+}> = [
+  {
+    label: "Full Implementation Text",
+    tokensPerSymbol: 1460,
+    tone: "danger",
+    shortLabel: "Full text",
+    description: "Send complete functions immediately."
+  },
+  {
+    label: "Semantic Chunks",
+    tokensPerSymbol: 220,
+    tone: "warning",
+    shortLabel: "Chunks",
+    description: "Send text chunks from matching files."
+  },
+  {
+    label: "Infimium AST Skeletons",
+    tokensPerSymbol: 8,
+    tone: "success",
+    shortLabel: "AST-first",
+    description: "Send signatures first; expand code only when needed."
+  }
+];
+
+function TokenOptimizationSimulator({ metrics }: { metrics: Metrics }) {
+  const [retrievals, setRetrievals] = useState(3);
+  const [strategy, setStrategy] = useState<RetrievalStrategy>("Infimium AST Skeletons");
+
+  const selected = retrievalStrategies.find((item) => item.label === strategy) ?? retrievalStrategies[2];
+  const fullText = retrievalStrategies[0];
+  const projectSymbols = Math.max(1, metrics.symbolCount);
+  const symbolsPerRetrieval = Math.max(1, Math.ceil(projectSymbols / 80));
+  const tokensBurned = Math.round(retrievals * symbolsPerRetrieval * selected.tokensPerSymbol);
+  const fullTextBaseline = Math.round(retrievals * symbolsPerRetrieval * fullText.tokensPerSymbol);
+  const contextPercent = simulatorInitialState.contextWindow > 0
+    ? (tokensBurned / simulatorInitialState.contextWindow) * 100
+    : 0;
+  const fullTextCost = (fullTextBaseline / 1_000_000) * metrics.usdPerMillionInputTokens;
+  const selectedCost = (tokensBurned / 1_000_000) * metrics.usdPerMillionInputTokens;
+  const costSaved = Math.max(0, fullTextCost - selectedCost);
+  const overLimit = tokensBurned > simulatorInitialState.contextWindow;
+  const selectedPercent = Math.min(100, (tokensBurned / Math.max(fullTextBaseline, 1)) * 100);
+  const savedPercent = fullTextBaseline > 0
+    ? Math.round((1 - tokensBurned / fullTextBaseline) * 1000) / 10
+    : 0;
+
+  return (
+    <article className="panel panel-wide simulator-panel">
+      <div className="simulator-heading">
+        <div>
+          <p className="panel-label">QUICK WHAT-IF</p>
+          <h2>How much context does the agent spend?</h2>
+          <p>
+            Pick how many times the agent searches this project. Compare full-code retrieval against Infimium's AST-first path.
+          </p>
+        </div>
+        <div className="simulator-savings-card" aria-label={`Project saved ${formatCurrency(metrics.estimatedUsdSaved)}`}>
+          <span>Project saved</span>
+          <strong>{formatCurrency(metrics.estimatedUsdSaved)}</strong>
+          <small>{formatCurrency(costSaved)} in this what-if</small>
+        </div>
+      </div>
+
+      <div className="simulator-stats" aria-label="Token spend summary">
+        <div>
+          <span>Selected strategy</span>
+          <strong>{selected.shortLabel}</strong>
+        </div>
+        <div>
+          <span>Context used</span>
+          <strong>{compactNumber(tokensBurned)}</strong>
+          <small>{Math.min(999, Math.round(contextPercent))}% of 128K</small>
+        </div>
+        <div>
+          <span>Saved vs full text</span>
+          <strong>{savedPercent}%</strong>
+          <small>{formatCurrency(costSaved)}</small>
+        </div>
+      </div>
+
+      <div className="simulator-bars" aria-label="Full text versus selected strategy token use">
+        <div className="simulator-bar-row">
+          <span>Full text</span>
+          <div><i style={{ width: "100%" }} /></div>
+          <strong>{compactNumber(fullTextBaseline)}</strong>
+        </div>
+        <div className={`simulator-bar-row is-${overLimit ? "danger" : selected.tone}`}>
+          <span>{selected.shortLabel}</span>
+          <div><i style={{ width: `${selectedPercent}%` }} /></div>
+          <strong>{compactNumber(tokensBurned)}</strong>
+        </div>
+      </div>
+
+      <div className="simulator-note">
+        <p>{selected.description}</p>
+        <span>{overLimit ? "Over context limit" : "Inside context limit"}</span>
+      </div>
+
+      <div className="simulator-controls" aria-label="Token optimization simulator controls">
+        <label>
+          <span>Agent searches</span>
+          <div className="simulator-range-row">
+            <input
+              type="range"
+              min="1"
+              max={simulatorInitialState.maxRetrievals}
+              value={retrievals}
+              onChange={(event) => setRetrievals(Number(event.target.value))}
+            />
+            <strong>{retrievals}</strong>
+          </div>
+        </label>
+
+        <div className="strategy-buttons" role="tablist" aria-label="Retrieval strategy">
+          <span>Strategy</span>
+          <div>
+            {retrievalStrategies.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                role="tab"
+                aria-selected={strategy === item.label}
+                className={strategy === item.label ? "is-active" : ""}
+                onClick={() => setStrategy(item.label)}
+              >
+                {item.shortLabel}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -1176,6 +1372,16 @@ function formatNumber(value: number): string {
 
 function compactNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatCurrency(value: number): string {
+  if (value > 0 && value < 0.01) return "<$0.01";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
 }
 
 function formatDate(value: string | null): string {

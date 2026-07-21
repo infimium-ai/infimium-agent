@@ -146,8 +146,21 @@ export type PlaygroundScopeMode = "project" | "workspace";
 
 export type PlaygroundScope = {
   mode: "single-project" | "watched-projects" | "workspace";
+  activeWorkspaceId: string | null;
   workspaceName: string | null;
   activeProjectPath: string;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    active: boolean;
+    projects: Array<{
+      id: string;
+      name: string;
+      path: string;
+      role: string | null;
+      active: boolean;
+    }>;
+  }>;
   projects: Array<{
     id: string;
     name: string;
@@ -276,13 +289,9 @@ export function readPlaygroundWorkspace(
   projectPath: string = process.cwd()
 ): PlaygroundGraph {
   const paths = resolvePlaygroundPaths(projectPath);
-  const manifestPath = findWorkspaceManifest(paths.projectPath);
-  if (manifestPath) {
-    try {
-      return readFederatedWorkspace(loadWorkspace(manifestPath), paths.graphDbPath);
-    } catch {
-      // Fall through to the file graph when a workspace manifest is incomplete.
-    }
+  const workspace = readWorkspace(paths.projectPath) ?? readRegisteredWorkspaceForProject(paths.projectPath);
+  if (workspace) {
+    return readFederatedWorkspace(workspace, paths.graphDbPath);
   }
 
   return readFileGraph(paths.projectPath, paths.graphDbPath);
@@ -292,8 +301,8 @@ export function readPlaygroundScope(
   projectPath: string = process.cwd()
 ): PlaygroundScope {
   const resolvedPath = canonicalPath(projectPath);
-  const workspace = readWorkspace(resolvedPath);
-  if (!workspace) {
+  const workspaces = readAvailableWorkspaces(resolvedPath);
+  if (workspaces.length === 0) {
     const paths = resolvePlaygroundPaths(resolvedPath);
     const watchedPaths = readWatchedProjectPaths(paths.graphDbPath, resolvedPath);
     const projects = watchedPaths.map((path) => ({
@@ -305,27 +314,48 @@ export function readPlaygroundScope(
     }));
     return {
       mode: projects.length > 1 ? "watched-projects" : "single-project",
+      activeWorkspaceId: null,
       workspaceName: null,
       activeProjectPath: resolvedPath,
+      workspaces: [],
       projects
     };
   }
 
+  const workspace =
+    workspaces.find((candidate) => findWorkspaceProject(candidate, resolvedPath)) ??
+    workspaces[0];
   const activeProject =
     findWorkspaceProject(workspace, resolvedPath) ??
     workspace.projects.find((project) => project.role === "active") ??
     workspace.projects[0];
+  const activeProjectPath = activeProject?.path ?? resolvedPath;
+  const projects = workspace.projects.map((project) => ({
+    id: project.id,
+    name: project.id,
+    path: project.path,
+    role: project.role,
+    active: project.path === activeProjectPath
+  }));
+
   return {
     mode: "workspace",
+    activeWorkspaceId: workspace.workspaceId,
     workspaceName: workspace.name,
-    activeProjectPath: activeProject.path,
-    projects: workspace.projects.map((project) => ({
-      id: project.id,
-      name: project.id,
-      path: project.path,
-      role: project.role,
-      active: project.path === activeProject.path
-    }))
+    activeProjectPath,
+    workspaces: workspaces.map((candidate) => ({
+      id: candidate.workspaceId,
+      name: candidate.name,
+      active: candidate.workspaceId === workspace.workspaceId,
+      projects: candidate.projects.map((project) => ({
+        id: project.id,
+        name: project.id,
+        path: project.path,
+        role: project.role,
+        active: candidate.workspaceId === workspace.workspaceId && project.path === activeProjectPath
+      }))
+    })),
+    projects
   };
 }
 
@@ -542,17 +572,17 @@ function resolvePlaygroundPaths(projectPath: string): PlaygroundPaths {
 
   return {
     projectPath: rootPath,
-    graphDbPath: firstExistingFile([
+    graphDbPath: firstReadableDatabaseFile([
       resolve(rootPath, ".infimium", "infimium.db"),
       resolve(projectDataPath, "infimium.db"),
       resolve(rootPath, "infimium.db")
     ]),
-    codeDbPath: firstExistingFile([
+    codeDbPath: firstReadableDatabaseFile([
       resolve(rootPath, ".infimium", "infimium_code.db"),
       resolve(projectDataPath, "infimium_code.db"),
       resolve(rootPath, "infimium_code.db")
     ]),
-    vectorDbPath: firstExistingFile([
+    vectorDbPath: firstReadableDatabaseFile([
       resolve(rootPath, ".infimium", "vectors.db"),
       resolve(projectDataPath, "vectors.db"),
       resolve(rootPath, "vectors.db")
@@ -573,6 +603,118 @@ function readWorkspace(projectPath: string): InfimiumWorkspace | null {
   } catch {
     return null;
   }
+}
+
+function readRegisteredWorkspaceForProject(projectPath: string): InfimiumWorkspace | null {
+  return readRegisteredWorkspaces(projectPath)
+    .find((workspace) => findWorkspaceProject(workspace, projectPath)) ?? null;
+}
+
+function readAvailableWorkspaces(projectPath: string): InfimiumWorkspace[] {
+  const registered = readRegisteredWorkspaces(projectPath);
+  const manifestWorkspace = readWorkspace(projectPath);
+  const workspaces = new Map<string, InfimiumWorkspace>();
+
+  for (const workspace of registered) {
+    workspaces.set(workspace.workspaceId, workspace);
+  }
+  if (manifestWorkspace) {
+    workspaces.set(manifestWorkspace.workspaceId, manifestWorkspace);
+  }
+
+  return [...workspaces.values()].sort((left, right) => {
+    const leftContains = findWorkspaceProject(left, projectPath) ? 0 : 1;
+    const rightContains = findWorkspaceProject(right, projectPath) ? 0 : 1;
+    return leftContains - rightContains || left.name.localeCompare(right.name);
+  });
+}
+
+function readRegisteredWorkspaces(projectPath: string): InfimiumWorkspace[] {
+  const configuredDataDir = process.env.INFIMIUM_DATA_DIR?.trim();
+  const databasePaths = uniqueStrings([
+    resolvePlaygroundPaths(projectPath).graphDbPath,
+    resolve(resolveProjectDataPath(projectPath), "infimium.db"),
+    ...(configuredDataDir ? [] : [resolve(homedir(), ".infimium", "data", "infimium.db")])
+  ].filter((value): value is string => value !== null));
+  const workspaces = new Map<string, InfimiumWorkspace>();
+
+  for (const databasePath of databasePaths) {
+    if (!canOpenReadOnly(databasePath)) continue;
+    const loaded = withReadOnlyDatabase(databasePath, (db) => readRegisteredWorkspacesFromDb(db));
+    for (const workspace of loaded) {
+      workspaces.set(workspace.workspaceId, workspace);
+    }
+  }
+
+  return [...workspaces.values()];
+}
+
+function readRegisteredWorkspacesFromDb(db: Database.Database): InfimiumWorkspace[] {
+  if (!tableExists(db, "workspaces") || !tableExists(db, "workspace_projects")) {
+    return [];
+  }
+
+  const workspaceRows = db
+    .prepare(
+      `SELECT workspace_id, name, manifest_path
+       FROM workspaces
+       ORDER BY updated_at DESC, name`
+    )
+    .all() as Array<JsonRecord>;
+  const projectRows = db
+    .prepare(
+      `SELECT workspace_id, project_id, project_path, role
+       FROM workspace_projects
+       ORDER BY workspace_id, project_id`
+    )
+    .all() as Array<JsonRecord>;
+  const relationshipRows = tableExists(db, "workspace_relationships")
+    ? db
+      .prepare(
+        `SELECT workspace_id, source_project_id, target_project_id
+         FROM workspace_relationships
+         WHERE relationship_type = 'depends_on'
+         ORDER BY workspace_id, source_project_id, target_project_id`
+      )
+      .all() as Array<JsonRecord>
+    : [];
+  const dependsOn = new Map<string, string[]>();
+  for (const row of relationshipRows) {
+    const workspaceId = readString(row.workspace_id);
+    const sourceProjectId = readString(row.source_project_id);
+    const targetProjectId = readString(row.target_project_id);
+    if (!workspaceId || !sourceProjectId || !targetProjectId) continue;
+    const key = `${workspaceId}\u0000${sourceProjectId}`;
+    dependsOn.set(key, [...(dependsOn.get(key) ?? []), targetProjectId]);
+  }
+
+  return workspaceRows.flatMap((row): InfimiumWorkspace[] => {
+    const workspaceId = readString(row.workspace_id);
+    const name = readString(row.name);
+    const manifestPath = readString(row.manifest_path);
+    if (!workspaceId || !name || !manifestPath) return [];
+    const projects = projectRows.flatMap((projectRow) => {
+      const projectWorkspaceId = readString(projectRow.workspace_id);
+      const id = readString(projectRow.project_id);
+      const path = readString(projectRow.project_path);
+      if (projectWorkspaceId !== workspaceId || !id || !path) return [];
+      return [{
+        id,
+        path,
+        role: readString(projectRow.role),
+        dependsOn: dependsOn.get(`${workspaceId}\u0000${id}`) ?? []
+      }];
+    });
+    if (projects.length === 0) return [];
+    return [{
+      schemaVersion: 1,
+      workspaceId,
+      name,
+      manifestPath,
+      rootPath: dirname(manifestPath),
+      projects
+    }];
+  });
 }
 
 function resolveScopedProjects(
@@ -820,8 +962,15 @@ function buildMetrics(
 ): PlaygroundMetrics {
   const averageSkeletonTokens = symbolCount > 0 ? 8 : 0;
   const averageFullTextTokens = symbolCount > 0 ? 1460 : 0;
-  const astFirstTokens = symbolCount * averageSkeletonTokens;
-  const fullTextTokens = symbolCount * averageFullTextTokens;
+  const hasUsefulObservedSavings = observedAverageFullTextTokens > observedAverageSkeletonTokens;
+  const projectSkeletonTokens = hasUsefulObservedSavings
+    ? observedAverageSkeletonTokens
+    : averageSkeletonTokens;
+  const projectFullTextTokens = hasUsefulObservedSavings
+    ? observedAverageFullTextTokens
+    : averageFullTextTokens;
+  const astFirstTokens = symbolCount * projectSkeletonTokens;
+  const fullTextTokens = symbolCount * projectFullTextTokens;
   const totalTokensSaved = Math.max(0, fullTextTokens - astFirstTokens);
   const configuredRate = Number.parseFloat(
     process.env.INFIMIUM_USD_PER_MILLION_INPUT_TOKENS?.trim() ?? "3"
@@ -843,8 +992,8 @@ function buildMetrics(
       : 0,
     usdPerMillionInputTokens,
     estimatedUsdSaved: Math.round(
-      (totalTokensSaved / 1_000_000) * usdPerMillionInputTokens * 10_000
-    ) / 10_000
+      (totalTokensSaved / 1_000_000) * usdPerMillionInputTokens * 1_000_000
+    ) / 1_000_000
   };
 }
 
@@ -960,12 +1109,28 @@ function firstExistingFile(candidates: string[]): string | null {
   }) ?? null;
 }
 
+function firstReadableDatabaseFile(candidates: string[]): string | null {
+  const existing = candidates.filter((candidate) => {
+    try {
+      return existsSync(candidate) && statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
+
+  return existing.find((candidate) => canOpenReadOnly(candidate)) ?? null;
+}
+
 function readRequestedProjectPath(request: Request, rootPath: string): string {
   const requestedPath = typeof request.query.project === "string"
     ? canonicalPath(request.query.project)
     : canonicalPath(rootPath);
   const scope = readPlaygroundScope(rootPath);
-  return scope.projects.find((project) => canonicalPath(project.path) === requestedPath)?.path
+  const allProjects = [
+    ...scope.projects,
+    ...scope.workspaces.flatMap((workspace) => workspace.projects)
+  ];
+  return allProjects.find((project) => canonicalPath(project.path) === requestedPath)?.path
     ?? scope.activeProjectPath;
 }
 
@@ -1005,7 +1170,14 @@ function readWatchedProjectPaths(graphDbPath: string | null, currentPath: string
   });
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
 function resolveProjectDataPath(projectPath: string): string {
+  const configuredDataDir = process.env.INFIMIUM_DATA_DIR?.trim();
+  if (configuredDataDir) return resolve(configuredDataDir);
+
   const projectEnvPath = findProjectEnv(projectPath);
   const projectDataDir = projectEnvPath
     ? readDataDirectoryFromEnv(projectEnvPath)

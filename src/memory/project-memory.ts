@@ -95,7 +95,8 @@ export class ProjectMemoryStore {
     mkdirSync(dirname(resolvedDbPath), { recursive: true });
     this.dbPath = resolvedDbPath;
     this.db = new DatabaseSync(resolvedDbPath);
-    this.db.exec("PRAGMA busy_timeout = 5000;");
+    this.db.exec("PRAGMA journal_mode = WAL;");
+    this.db.exec("PRAGMA busy_timeout = 30000;");
     this.ensureSchema();
   }
 

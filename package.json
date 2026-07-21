@@ -1,6 +1,6 @@
 {
   "name": "infimium",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Private context layer MCP for AI agents.",
   "private": false,
   "mcpName": "io.github.aryankumar06/infimium",
@@ -31,8 +31,12 @@
   "engines": {
     "node": ">=22.5.0"
   },
+  "overrides": {
+    "@hono/node-server": "^2.0.5"
+  },
   "scripts": {
     "start": "tsx src/index.ts",
+    "setup": "tsx src/index.ts setup",
     "index": "tsx src/index.ts index",
     "watch": "tsx src/index.ts watch",
     "workspace": "tsx src/index.ts workspace",
@@ -67,18 +71,12 @@
     "express": "^5.2.1",
     "glob": "^13.0.6",
     "ignore": "^7.0.6",
-    "lucide-react": "^1.25.0",
     "open": "^11.0.0",
     "pdf-parse": "^2.4.5",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-force-graph-2d": "^1.29.1",
-    "recharts": "^3.9.2",
     "tree-sitter": "0.21.1",
     "tree-sitter-javascript": "0.21.4",
     "tree-sitter-python": "0.21.0",
     "tree-sitter-typescript": "0.23.2",
-    "tsx": "^4.19.2",
     "turndown": "^7.2.0",
     "web-tree-sitter": "^0.25.10",
     "yaml": "^2.9.0",
@@ -92,10 +90,15 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/turndown": "^5.0.5",
-    "@vitejs/plugin-react": "^4.7.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "lucide-react": "^1.25.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-force-graph-2d": "^1.29.1",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
-    "vite": "^5.4.21",
-    "vitest": "^2.1.8"
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }

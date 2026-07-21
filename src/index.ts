@@ -19,6 +19,7 @@ import {
 } from "./commands/memory.js";
 import { runPlanCommand } from "./commands/plan.js";
 import { runSearchCommand } from "./commands/search.js";
+import { runSetupCommand } from "./commands/setup.js";
 import { runWorkspaceCommand } from "./commands/workspace.js";
 import { startServer } from "./server.js";
 import { protectStdioStdout } from "./stdio.js";
@@ -32,6 +33,11 @@ async function main(): Promise<void> {
     await initEnv(undefined, {
       telemetryEnabled: !args.includes("--no-telemetry")
     });
+    return;
+  }
+
+  if (command === "setup") {
+    await runSetupCommand(args);
     return;
   }
 

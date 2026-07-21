@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   readPlaygroundHealth,
@@ -17,8 +17,21 @@ import {
 } from "../src/playground/api.js";
 
 const temporaryPaths: string[] = [];
+let previousDataDir: string | undefined;
+
+beforeEach(async () => {
+  previousDataDir = process.env.INFIMIUM_DATA_DIR;
+  const dataDir = await mkdtemp(join(tmpdir(), "infimium-playground-data-"));
+  temporaryPaths.push(dataDir);
+  process.env.INFIMIUM_DATA_DIR = dataDir;
+});
 
 afterEach(async () => {
+  if (previousDataDir === undefined) {
+    delete process.env.INFIMIUM_DATA_DIR;
+  } else {
+    process.env.INFIMIUM_DATA_DIR = previousDataDir;
+  }
   await Promise.all(
     temporaryPaths.splice(0).map((filePath) => rm(filePath, { recursive: true, force: true }))
   );
@@ -212,6 +225,87 @@ workingTree:
     expect(workspaceLogs.items.map((item) => item.projectId).sort()).toEqual([
       "backend",
       "frontend"
+    ]);
+  });
+
+  it("exposes globally registered workspaces separately from their projects", async () => {
+    const dataDir = await createProject();
+    process.env.INFIMIUM_DATA_DIR = dataDir;
+
+    const codexRoot = await createProject();
+    const infimiumPath = join(codexRoot, "infimium");
+    const starterPath = join(codexRoot, "vite-react-typescript-starter");
+    const klubeatsRoot = await createProject();
+    const userAppPath = join(klubeatsRoot, "UserApp");
+    const brandAppPath = join(klubeatsRoot, "BrandApp");
+    const adminAppPath = join(klubeatsRoot, "AdminApp");
+    await Promise.all([
+      mkdir(infimiumPath, { recursive: true }),
+      mkdir(starterPath, { recursive: true }),
+      mkdir(userAppPath, { recursive: true }),
+      mkdir(brandAppPath, { recursive: true }),
+      mkdir(adminAppPath, { recursive: true })
+    ]);
+
+    const db = new Database(join(dataDir, "infimium.db"));
+    db.exec(`
+      CREATE TABLE workspaces (
+        workspace_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        manifest_path TEXT NOT NULL UNIQUE,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE workspace_projects (
+        workspace_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        project_path TEXT NOT NULL,
+        role TEXT,
+        PRIMARY KEY (workspace_id, project_id)
+      );
+      CREATE TABLE workspace_relationships (
+        workspace_id TEXT NOT NULL,
+        source_project_id TEXT NOT NULL,
+        target_project_id TEXT NOT NULL,
+        relationship_type TEXT NOT NULL,
+        weight INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (workspace_id, source_project_id, target_project_id, relationship_type)
+      );
+    `);
+    db.prepare("INSERT INTO workspaces VALUES (?, ?, ?, ?)").run(
+      "codex",
+      "Codex",
+      join(codexRoot, "infimium.workspace.json"),
+      200
+    );
+    db.prepare("INSERT INTO workspaces VALUES (?, ?, ?, ?)").run(
+      "klubeats",
+      "Klubeats",
+      join(klubeatsRoot, "infimium.workspace.json"),
+      100
+    );
+    const insertProject = db.prepare("INSERT INTO workspace_projects VALUES (?, ?, ?, ?)");
+    insertProject.run("codex", "infimium", infimiumPath, "active");
+    insertProject.run("codex", "vite-react-typescript-starter", starterPath, null);
+    insertProject.run("klubeats", "UserApp", userAppPath, "active");
+    insertProject.run("klubeats", "BrandApp", brandAppPath, null);
+    insertProject.run("klubeats", "AdminApp", adminAppPath, null);
+    db.close();
+
+    const scope = readPlaygroundScope(infimiumPath);
+    const klubeats = scope.workspaces.find((workspace) => workspace.id === "klubeats");
+
+    expect(scope.workspaces.map((workspace) => workspace.name).sort()).toEqual([
+      "Codex",
+      "Klubeats"
+    ]);
+    expect(scope.projects.map((project) => project.name).sort()).toEqual([
+      "infimium",
+      "vite-react-typescript-starter"
+    ]);
+    expect(klubeats?.projects.map((project) => project.name).sort()).toEqual([
+      "AdminApp",
+      "BrandApp",
+      "UserApp"
     ]);
   });
 });

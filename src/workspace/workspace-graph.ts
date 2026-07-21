@@ -39,7 +39,8 @@ export class WorkspaceGraphStore {
     const resolvedPath = resolve(sqlitePath);
     mkdirSync(dirname(resolvedPath), { recursive: true });
     this.db = new DatabaseSync(resolvedPath);
-    this.db.exec("PRAGMA busy_timeout = 5000;");
+    this.db.exec("PRAGMA journal_mode = WAL;");
+    this.db.exec("PRAGMA busy_timeout = 30000;");
     if (options.initialize ?? true) {
       this.ensureSchema();
     }

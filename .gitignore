@@ -9,3 +9,7 @@ chroma_db/
 /context/
 .DS_Store
 infimium-agent/
+
+# Local-only private notes should live outside the repo or in .infimium-private/
+.infimium-private/
+*.local.md

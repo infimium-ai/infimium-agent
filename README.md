@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/infimium-logo.png" alt="Infimium" width="110" />
+  <img src="public/infimium-logo.png" alt="Infimium" width="200" />
 </p>
 
 # Infimium
@@ -52,19 +52,21 @@ Open **Token Economics** to see the estimated token difference across your actua
 
 ## Quick Start
 
-Requires Node.js 22.5+ and [Ollama](https://ollama.com/).
+Requires Node.js 22.5+. From your project folder:
 
 ```bash
-npm install -g infimium
-ollama serve
-ollama pull nomic-embed-text
-cd /path/to/your/project
-infimium init
-infimium index
-infimium doctor
+npx infimium@latest setup
 ```
 
-`infimium init` creates one global config at `~/.infimium/.env`. You do not need a `.env` in every project. Code, docs, memory, graphs, and vectors are stored locally under `~/.infimium/`.
+That creates global config, starts Ollama if it is installed, pulls `nomic-embed-text`, indexes the current project or workspace, runs `doctor`, and opens Playground.
+
+If Ollama is not installed yet:
+
+```bash
+npx infimium@latest setup --install-deps
+```
+
+`infimium setup` creates one global config at `~/.infimium/.env`. You do not need a `.env` in every project. Code, docs, memory, graphs, and vectors are stored locally under `~/.infimium/`.
 
 Web search is optional. Add a Tinyfish key only when you need it:
 

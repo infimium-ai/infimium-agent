@@ -241,7 +241,7 @@ function openDatabase(dbPath: string): Database {
   const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA busy_timeout = 30000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS vector_collections (
       name TEXT PRIMARY KEY,

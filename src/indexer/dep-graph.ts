@@ -249,6 +249,9 @@ export class DepGraphBuilder {
       const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
       this.db = new DatabaseSync(this.sqlitePath);
       this.db.exec(`
+        PRAGMA journal_mode = WAL;
+        PRAGMA busy_timeout = 30000;
+
         CREATE TABLE IF NOT EXISTS file_imports (
           source_file TEXT NOT NULL,
           imported_file TEXT NOT NULL,
