@@ -1,16 +1,19 @@
-import { constants } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants, existsSync, readFileSync } from "node:fs";
+import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { loadConfigEnvironment } from "./env.js";
 
 const TELEMETRY_VERSION = 1;
-const INFIMIUM_VERSION = "0.4.1";
+const INFIMIUM_VERSION = readInfimiumVersion();
 const DEFAULT_POSTHOG_ENDPOINT = "https://us.i.posthog.com/capture/";
 const DEFAULT_POSTHOG_PROJECT_KEY = "phc_qsitSGmdMwdhYozF3FdXuRoPwH84fRbPrQKZjC6LemH4";
 const TELEMETRY_TIMEOUT_MS = 1500;
+const TELEMETRY_LOCK_WAIT_MS = 2000;
+const TELEMETRY_LOCK_STALE_MS = 30000;
 
 type InstallRecord = {
   installId: string;
@@ -75,36 +78,51 @@ export async function trackSetupCompleted(
   properties: Record<string, string | number | boolean | null> = {},
   options: TrackOptions = {}
 ): Promise<void> {
-  const record = await readOrCreateInstallRecord(options.installPath);
-  if (record.setupCompletedTracked) {
-    return;
-  }
+  await withInstallRecordLock(options.installPath, async (installPath) => {
+    const record = await readOrCreateInstallRecord(installPath);
+    if (record.setupCompletedTracked) {
+      return;
+    }
 
-  const sent = await trackTelemetry("setup_completed", properties, options);
-  if (sent) {
-    await updateInstallRecord(
-      { ...record, setupCompletedTracked: true },
-      options.installPath
+    const sent = await trackTelemetry(
+      "setup_completed",
+      { ...properties, $insert_id: `${record.installId}:setup_completed` },
+      { installPath }
     );
-  }
+    if (sent) {
+      await updateInstallRecord(
+        { ...record, setupCompletedTracked: true },
+        installPath
+      );
+    }
+  });
 }
 
 export async function trackFirstToolCall(
   toolName: string,
   options: TrackOptions = {}
 ): Promise<void> {
-  const record = await readOrCreateInstallRecord(options.installPath);
-  if (record.firstToolCallTracked) {
-    return;
-  }
+  await withInstallRecordLock(options.installPath, async (installPath) => {
+    const record = await readOrCreateInstallRecord(installPath);
+    if (record.firstToolCallTracked) {
+      return;
+    }
 
-  const sent = await trackTelemetry("first_tool_call", { tool_name: toolName }, options);
-  if (sent) {
-    await updateInstallRecord(
-      { ...record, firstToolCallTracked: true },
-      options.installPath
+    const sent = await trackTelemetry(
+      "first_tool_call",
+      {
+        tool_name: toolName,
+        $insert_id: `${record.installId}:first_tool_call`
+      },
+      { installPath }
     );
-  }
+    if (sent) {
+      await updateInstallRecord(
+        { ...record, firstToolCallTracked: true },
+        installPath
+      );
+    }
+  });
 }
 
 export async function setTelemetryEnabled(
@@ -153,6 +171,39 @@ export async function runTelemetryCommand(args: string[]): Promise<void> {
 }
 
 async function readOrCreateInstallRecord(installPath = defaultInstallPath()): Promise<InstallRecord> {
+  const existing = await readInstallRecord(installPath);
+  if (existing) {
+    return existing;
+  }
+
+  const record: InstallRecord = {
+    installId: randomUUID(),
+    createdAt: Date.now()
+  };
+
+  await mkdir(dirname(installPath), { recursive: true });
+  try {
+    await writeFile(installPath, `${JSON.stringify(record, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600
+    });
+    return record;
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === "EEXIST") {
+      const concurrentRecord = await readInstallRecord(installPath);
+      if (concurrentRecord) {
+        return concurrentRecord;
+      }
+    }
+  }
+
+  // If the existing file is corrupt, replace it with a valid anonymous record.
+  await updateInstallRecord(record, installPath);
+  return record;
+}
+
+async function readInstallRecord(installPath: string): Promise<InstallRecord | null> {
   try {
     const raw = await readFile(installPath, "utf8");
     const parsed = JSON.parse(raw) as Partial<InstallRecord>;
@@ -166,15 +217,9 @@ async function readOrCreateInstallRecord(installPath = defaultInstallPath()): Pr
       };
     }
   } catch {
-    // Create a fresh anonymous install record below.
+    return null;
   }
-
-  const record: InstallRecord = {
-    installId: randomUUID(),
-    createdAt: Date.now()
-  };
-  await updateInstallRecord(record, installPath);
-  return record;
+  return null;
 }
 
 async function updateInstallRecord(record: InstallRecord, installPath = defaultInstallPath()): Promise<void> {
@@ -183,6 +228,60 @@ async function updateInstallRecord(record: InstallRecord, installPath = defaultI
     encoding: "utf8",
     mode: 0o600
   });
+}
+
+async function withInstallRecordLock(
+  installPath = defaultInstallPath(),
+  callback: (installPath: string) => Promise<void>
+): Promise<void> {
+  const lockPath = `${installPath}.lock`;
+  const release = await acquireInstallRecordLock(lockPath);
+  if (!release) {
+    return;
+  }
+
+  try {
+    await callback(installPath);
+  } finally {
+    await release();
+  }
+}
+
+async function acquireInstallRecordLock(lockPath: string): Promise<(() => Promise<void>) | null> {
+  await mkdir(dirname(lockPath), { recursive: true });
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < TELEMETRY_LOCK_WAIT_MS) {
+    try {
+      await mkdir(lockPath, { mode: 0o700 });
+      return async () => {
+        await rm(lockPath, { recursive: true, force: true });
+      };
+    } catch (error: unknown) {
+      if (!isNodeError(error) || error.code !== "EEXIST") {
+        return null;
+      }
+      await removeStaleLock(lockPath);
+      await sleep(25);
+    }
+  }
+
+  return null;
+}
+
+async function removeStaleLock(lockPath: string): Promise<void> {
+  try {
+    const { mtimeMs } = await stat(lockPath);
+    if (Date.now() - mtimeMs > TELEMETRY_LOCK_STALE_MS) {
+      await rm(lockPath, { recursive: true, force: true });
+    }
+  } catch {
+    // Lock disappeared between attempts.
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
 function defaultInstallPath(): string {
@@ -222,8 +321,49 @@ function sanitizeProperties(
     infimium_version: INFIMIUM_VERSION,
     os: platform(),
     node_major: Number(process.versions.node.split(".")[0] ?? 0),
+    run_source: detectRunSource(),
     ...properties
   };
+}
+
+function readInfimiumVersion(): string {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(moduleDir, "../package.json"),
+    resolve(moduleDir, "../../package.json")
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue;
+      const parsed = JSON.parse(readFileSync(candidate, "utf8")) as { version?: unknown };
+      if (typeof parsed.version === "string") {
+        return parsed.version;
+      }
+    } catch {
+      // Fall through to unknown.
+    }
+  }
+
+  return "unknown";
+}
+
+function detectRunSource(): "npx" | "global" | "local" {
+  const entrypoint = process.argv[1] ?? "";
+  if (entrypoint.includes("_npx")) {
+    return "npx";
+  }
+  if (
+    entrypoint.includes("/lib/node_modules/infimium/") ||
+    entrypoint.includes("\\node_modules\\infimium\\")
+  ) {
+    return "global";
+  }
+  return "local";
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 export async function telemetryConfigExists(path: string): Promise<boolean> {
