@@ -2,17 +2,17 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.aryankumar06/infimium",
   "title": "Infimium",
-  "description": "Private context layer for AI agents: web, docs, code, deps, memory, and plans.",
+  "description": "Private AI context layer for semantic code search, dependency graphs, memory, and workspaces.",
   "repository": {
     "url": "https://github.com/infimium-ai/infimium-agent",
     "source": "github"
   },
-  "version": "0.2.1",
+  "version": "0.3.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "infimium",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "transport": {
         "type": "stdio"
       },

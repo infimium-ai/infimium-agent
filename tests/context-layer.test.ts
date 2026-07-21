@@ -83,7 +83,7 @@ describe("context layer", () => {
       });
 
       expect(context).toContain("Cached context note");
-      expect(context).toContain("schemaVersion: 2");
+      expect(context).toContain("schemaVersion: 3");
     } finally {
       memoryStore.close();
     }
@@ -99,10 +99,10 @@ describe("context layer", () => {
         memoryStore
       });
       expect(JSON.parse(context)).toMatchObject({
-        schemaVersion: 2,
+        schemaVersion: 3,
         project: { path: projectPath }
       });
-      expect(await readFile(contextFilePath, "utf8")).toContain("schemaVersion: 2");
+      expect(await readFile(contextFilePath, "utf8")).toContain("schemaVersion: 3");
     } finally {
       memoryStore.close();
     }
@@ -182,6 +182,66 @@ describe("context layer", () => {
       expect(snapshot.workingTree.changedFiles).toHaveLength(10);
       expect(snapshot.workingTree.omittedFiles).toBe(6);
       expect(snapshot.workingTree.summary).toContain("16 changed files");
+    } finally {
+      memoryStore.close();
+    }
+  });
+
+  it("returns compressed related-project context without mixing project memory", async () => {
+    const backendPath = join(tempDir, "backend");
+    await mkdir(backendPath, { recursive: true });
+    await writeFile(join(backendPath, "README.md"), "# Backend API\n", "utf8");
+    await writeFile(
+      join(tempDir, "infimium.workspace.json"),
+      JSON.stringify({
+        name: "Example product",
+        projects: [
+          { id: "frontend", path: "./repo", role: "client", dependsOn: ["backend"] },
+          { id: "backend", path: "./backend", role: "api" }
+        ]
+      }),
+      "utf8"
+    );
+
+    const memoryStore = new ProjectMemoryStore(dbPath);
+    try {
+      memoryStore.remember({
+        projectPath,
+        eventType: "progress",
+        summary: "Frontend task"
+      });
+      memoryStore.remember({
+        projectPath: backendPath,
+        eventType: "progress",
+        summary: "Private backend task"
+      });
+
+      const writer = new ContextLayerWriter({
+        projectPath,
+        filePath: contextFilePath,
+        memoryStore
+      });
+      const snapshot = await writer.refresh();
+
+      expect(snapshot.workspace).toMatchObject({
+        name: "Example product",
+        currentProjectId: "frontend",
+        totalProjects: 2,
+        relationships: [
+          {
+            sourceProjectId: "frontend",
+            targetProjectId: "backend",
+            type: "depends_on"
+          }
+        ]
+      });
+      expect(snapshot.workspace?.projects.map((project) => project.id)).toEqual([
+        "frontend",
+        "backend"
+      ]);
+      expect(snapshot.recentMemory.map((event) => event.summary)).toEqual(["Frontend task"]);
+      expect(JSON.stringify(snapshot.workspace)).not.toContain("Private backend task");
+      expect(snapshot.workingTree.changedFiles.every((file) => !file.path.includes("backend"))).toBe(true);
     } finally {
       memoryStore.close();
     }

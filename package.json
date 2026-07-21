@@ -1,6 +1,6 @@
 {
   "name": "infimium",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Private context layer MCP for AI agents.",
   "private": false,
   "mcpName": "io.github.aryankumar06/infimium",
@@ -34,6 +34,7 @@
     "start": "tsx src/index.ts",
     "index": "tsx src/index.ts index",
     "watch": "tsx src/index.ts watch",
+    "workspace": "tsx src/index.ts workspace",
     "hello": "tsx src/index.ts hello",
     "search": "tsx src/index.ts search",
     "fetch": "tsx src/index.ts fetch",

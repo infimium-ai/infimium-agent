@@ -538,7 +538,7 @@ export function createServer(): Server {
   const server = new Server(
     {
       name: "infimium",
-      version: "0.2.1"
+      version: "0.3.0"
     },
     {
       capabilities: {
