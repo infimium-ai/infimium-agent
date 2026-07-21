@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4
+
+- Deduplicated concurrent `first_tool_call` telemetry events per install.
+- Made anonymous install ID creation atomic across concurrent processes.
+- Added runtime source metadata and fixed telemetry package version reporting.
+
 ## 0.4.3
 
 - Fixed Playground SPA fallback serving in global npm installs.
