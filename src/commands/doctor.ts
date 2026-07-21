@@ -6,15 +6,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { config as loadDotenv } from "dotenv";
-
+import { loadConfigEnvironment } from "../env.js";
 import { dataPath } from "../paths.js";
+import { trackSetupCompleted, trackTelemetry } from "../telemetry.js";
+import { createVectorClient } from "../vector-store.js";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const EMBEDDING_MODEL = "nomic-embed-text";
 const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
-const DEFAULT_CHROMADB_HOST = "http://localhost:8000";
 const CHECK_TIMEOUT_MS = 3000;
 const MAC_OLLAMA_BINARY = "/Applications/Ollama.app/Contents/Resources/ollama";
 
@@ -49,24 +49,29 @@ type NumberRow = {
 };
 
 export async function runDoctorCommand(): Promise<void> {
+  await trackTelemetry("doctor_run");
   const checks = await collectDoctorChecks();
   console.log(formatDoctorReport(checks));
-  process.exitCode = checks.every((check) => check.status === "pass") ? 0 : 1;
+  const passed = checks.every((check) => check.status === "pass");
+  if (passed) {
+    await trackTelemetry("doctor_passed");
+    await trackSetupCompleted({ source: "doctor" });
+  }
+  process.exitCode = passed ? 0 : 1;
 }
 
 export async function collectDoctorChecks(): Promise<DoctorCheck[]> {
-  loadDotenv();
+  const environment = loadConfigEnvironment();
 
   const packageJson = await readInfimiumPackageJson();
   const ollamaHost = normalizeBaseUrl(process.env.OLLAMA_HOST, DEFAULT_OLLAMA_HOST);
-  const chromadbHost = normalizeBaseUrl(process.env.CHROMADB_HOST, DEFAULT_CHROMADB_HOST);
 
   return [
     await checkNodeAndNpm(packageJson),
     await checkOllama(ollamaHost),
     await checkEmbeddingModel(ollamaHost),
-    await checkChromaDb(chromadbHost),
-    checkConfigEnv(),
+    await checkEmbeddedVectorStore(),
+    checkConfigEnv(environment.loadedFiles),
     checkIndexStatus()
   ];
 }
@@ -173,66 +178,35 @@ async function checkEmbeddingModel(ollamaHost: string): Promise<DoctorCheck> {
   );
 }
 
-async function checkChromaDb(chromadbHost: string): Promise<DoctorCheck> {
-  const heartbeatUrls = [
-    `${chromadbHost}/api/v2/heartbeat`,
-    `${chromadbHost}/api/v1/heartbeat`
-  ];
-
-  for (const url of heartbeatUrls) {
-    const response = await fetchText(url);
-    if (response.ok) {
-      return pass("ChromaDB", `ChromaDB is reachable at ${chromadbHost}.`);
-    }
-  }
-
-  return fail(
-    "ChromaDB",
-    `ChromaDB is not reachable at ${chromadbHost}.`,
-    "docker run -d --name infimium-chromadb -p 8000:8000 -v chroma_data:/chroma/chroma chromadb/chroma:latest"
-  );
-}
-
-function checkConfigEnv(): DoctorCheck {
-  const envPath = resolve(process.cwd(), ".env");
-  const missing: string[] = [];
-
-  if (!existsSync(envPath)) {
+async function checkEmbeddedVectorStore(): Promise<DoctorCheck> {
+  const vectorDbPath = resolve(dataPath("vectors.db"));
+  try {
+    const collection = await createVectorClient(vectorDbPath).getOrCreateCollection({
+      name: "infimium_doctor"
+    });
+    await collection.count();
+    return pass("Embedded vector store", `SQLite vector storage is writable at ${vectorDbPath}.`);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
     return fail(
-      "Config/env",
-      ".env is missing in the current project.",
-      "cp .env.example .env"
+      "Embedded vector store",
+      `Could not open ${vectorDbPath}: ${message}`,
+      embeddedStoreFixCommand()
     );
   }
+}
 
-  const requiredEnv = [
-    "SEARCH_PROVIDER",
-    "OLLAMA_HOST",
-    "CHROMADB_HOST",
-    "SHELL_ALLOWLIST"
-  ] as const;
-
-  for (const key of requiredEnv) {
-    if (!process.env[key]?.trim()) {
-      missing.push(key);
-    }
-  }
-
-  if (!process.env.LOCAL_DOCS_PATH?.trim() && !process.env.CODEBASE_PATH?.trim()) {
-    missing.push("LOCAL_DOCS_PATH or CODEBASE_PATH");
-  }
-
-  if (missing.length === 0) {
-    const searchStatus = process.env.SEARCH_API_KEY?.trim()
-      ? "Tinyfish web_search is configured."
-      : "SEARCH_API_KEY is empty; web_search is disabled until you add a Tinyfish key.";
-    return pass("Config/env", `.env exists and required values are set. ${searchStatus}`);
-  }
-
-  return fail(
+function checkConfigEnv(loadedFiles: string[]): DoctorCheck {
+  const source = loadedFiles.length > 0
+    ? loadedFiles.join(", ")
+    : "built-in defaults (no project .env required)";
+  const searchStatus = process.env.SEARCH_API_KEY?.trim()
+    ? "Tinyfish web search is configured."
+    : "Web search is optional and currently disabled.";
+  const activeProject = resolve(process.env.CODEBASE_PATH?.trim() || process.cwd());
+  return pass(
     "Config/env",
-    `Missing: ${missing.join(", ")}.`,
-    "printf '\\nSEARCH_API_KEY=your_tinyfish_api_key\\nSEARCH_PROVIDER=tinyfish\\nLOCAL_DOCS_PATH=./docs\\nCODEBASE_PATH=.\\nOLLAMA_HOST=http://localhost:11434\\nCHROMADB_HOST=http://localhost:8000\\nSHELL_ALLOWLIST=ls,git,npm,npx\\n' >> .env"
+    `Using ${source}; active project is ${activeProject}. ${searchStatus}`
   );
 }
 
@@ -361,11 +335,6 @@ async function fetchJson<T>(url: string): Promise<{ ok: true; data: T } | { ok: 
   } catch {
     return { ok: false };
   }
-}
-
-async function fetchText(url: string): Promise<{ ok: boolean }> {
-  const response = await fetchWithTimeout(url);
-  return { ok: response?.ok ?? false };
 }
 
 async function fetchWithTimeout(url: string): Promise<Response | null> {
@@ -510,4 +479,11 @@ function ollamaServeCommand(binary: string): string {
 
 function quoteCommand(command: string): string {
   return command.includes(" ") ? `"${command}"` : command;
+}
+
+function embeddedStoreFixCommand(): string {
+  if (process.platform === "win32") {
+    return "powershell -Command \"New-Item -ItemType Directory -Force $HOME/.infimium/data\"";
+  }
+  return "mkdir -p ~/.infimium/data && chmod 700 ~/.infimium ~/.infimium/data";
 }

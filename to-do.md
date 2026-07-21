@@ -4,7 +4,7 @@
 
 - [ ] Create a Brave Search API key and paste it into `.env` as `SEARCH_API_KEY=...`.
 - [ ] Keep `SEARCH_PROVIDER=brave` in `.env`.
-- [ ] Start a local ChromaDB server before running `infimium index`.
+- [x] Replaced ChromaDB with embedded SQLite vector storage; no database service is required.
 - [ ] Set `LOCAL_DOCS_PATH=/path/to/docs` in `.env` before indexing docs.
 - [ ] Run `npm test` after each tool implementation.
 

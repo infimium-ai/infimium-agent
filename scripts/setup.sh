@@ -1,62 +1,30 @@
 #!/bin/bash
 set -e
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is required. Install Docker and rerun this script." >&2
+if ! command -v npm >/dev/null 2>&1; then
+  echo "Node.js 22.5+ is required. Install it from https://nodejs.org and rerun." >&2
   exit 1
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Compose is required. Install Docker Compose and rerun this script." >&2
-  exit 1
+npm ci
+npm run build
+node dist/src/index.js init
+
+if ! command -v ollama >/dev/null 2>&1; then
+  if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+    brew install ollama
+  else
+    curl -fsSL https://ollama.com/install.sh | sh
+  fi
 fi
 
-if [ ! -f .env ]; then
-  cp .env.example .env
-  echo "Created .env. Tinyfish SEARCH_API_KEY is optional for web_search."
+if ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+  ollama serve >/tmp/infimium-ollama.log 2>&1 &
+  sleep 3
 fi
 
-docker compose up -d chromadb
-
-for i in {1..30}; do
-  if curl -fsS http://localhost:8000/api/v2/heartbeat >/dev/null 2>&1 || curl -fsS http://localhost:8000/api/v1/heartbeat >/dev/null 2>&1; then
-    break
-  fi
-
-  if [ "$i" -eq 30 ]; then
-    echo "ChromaDB did not become healthy within 30 seconds." >&2
-    exit 1
-  fi
-
-  sleep 1
-done
-
-docker compose build infimium
-docker compose run --rm infimium npm run index
+ollama pull nomic-embed-text
+node dist/src/index.js index
 
 echo ""
-echo "✓ Infimium is ready."
-echo ""
-echo "Add this MCP server to Cursor, Windsurf, or Claude Desktop:"
-cat <<EOF
-{
-  "mcpServers": {
-    "infimium": {
-      "command": "docker",
-      "args": [
-        "compose",
-        "-f",
-        "$(pwd)/docker-compose.yml",
-        "run",
-        "--rm",
-        "-T",
-        "infimium",
-        "npm",
-        "start",
-        "--",
-        "serve"
-      ]
-    }
-  }
-}
-EOF
+echo "Infimium is ready. Run: npx infimium doctor"
