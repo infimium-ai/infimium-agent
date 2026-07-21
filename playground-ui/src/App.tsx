@@ -11,8 +11,10 @@ import {
   FileCode2,
   Folder,
   GitBranch,
+  Moon,
   Network,
   Search,
+  Sun,
   TerminalSquare,
   X
 } from "lucide-react";
@@ -28,6 +30,7 @@ import {
 } from "recharts";
 
 type ViewId = "pulse" | "graph" | "index" | "economics";
+type ThemeMode = "dark" | "light";
 
 type NavigationItem = {
   id: ViewId;
@@ -176,9 +179,23 @@ const viewCopy: Record<ViewId, { eyebrow: string; title: string }> = {
   economics: { eyebrow: "Efficiency / Context", title: "Token Economics" }
 };
 
+function readInitialTheme(): ThemeMode {
+  if (typeof window === "undefined") return "dark";
+  return window.localStorage.getItem("infimium-playground-theme") === "light"
+    ? "light"
+    : "dark";
+}
+
+function cssVariable(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 export function App() {
   const [activeView, setActiveView] = useState<ViewId>("pulse");
   const [selectedProjectPath, setSelectedProjectPath] = useState("");
+  const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const scope = useApi<PlaygroundScope>("/api/scope");
   const selectedProject = scope.data?.projects.find(
     (project) => project.path === selectedProjectPath
@@ -193,11 +210,20 @@ export function App() {
     setSelectedProjectPath(scope.data.activeProjectPath);
   }, [scope.data, selectedProjectPath]);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("infimium-playground-theme", theme);
+  }, [theme]);
+
+  const nextTheme = theme === "dark" ? "light" : "dark";
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true">inf</div>
+          <div className="brand-mark" aria-hidden="true">
+            <img src="/infimium-logo.png" alt="" />
+          </div>
           <div>
             <p className="brand-name">Infimium</p>
             <p className="brand-mode">PLAYGROUND</p>
@@ -239,6 +265,15 @@ export function App() {
             <h1>{active.title}</h1>
           </div>
           <div className="topbar-controls">
+            <button
+              type="button"
+              className="theme-toggle"
+              aria-label={`Switch to ${nextTheme} mode`}
+              title={`Switch to ${nextTheme} mode`}
+              onClick={() => setTheme(nextTheme)}
+            >
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
             {scope.data && selectedProject ? (
               <label className="project-picker">
                 <span>{scope.data.projects.length} WATCHED PROJECT{scope.data.projects.length === 1 ? "" : "S"}</span>
@@ -263,7 +298,7 @@ export function App() {
 
         <section className="content-grid" aria-live="polite">
           {activeView === "pulse" ? <PulseView projectPath={projectPath} /> : null}
-          {activeView === "graph" ? <GraphView projectPath={projectPath} /> : null}
+          {activeView === "graph" ? <GraphView projectPath={projectPath} theme={theme} /> : null}
           {activeView === "index" && scope.data ? (
             <IndexView projectPath={projectPath} scopeData={scope.data} />
           ) : null}
@@ -339,7 +374,7 @@ function PulseView({ projectPath }: { projectPath: string }) {
   );
 }
 
-function GraphView({ projectPath }: { projectPath: string }) {
+function GraphView({ projectPath, theme }: { projectPath: string; theme: ThemeMode }) {
   const [mode, setMode] = useState<GraphMode>("modules");
   const graph = useApi<Graph>(withProject("/api/workspace", projectPath));
   const visibleGraph = useMemo(() => {
@@ -386,7 +421,7 @@ function GraphView({ projectPath }: { projectPath: string }) {
         </div>
       </div>
       {graph.data.nodes.length > 1 ? (
-        <NetworkGraph graph={visibleGraph} mode={mode} />
+        <NetworkGraph graph={visibleGraph} mode={mode} theme={theme} />
       ) : (
         <div className="center-empty">
           <Network size={24} />
@@ -398,7 +433,7 @@ function GraphView({ projectPath }: { projectPath: string }) {
   );
 }
 
-function NetworkGraph({ graph, mode }: { graph: Graph; mode: GraphMode }) {
+function NetworkGraph({ graph, mode, theme }: { graph: Graph; mode: GraphMode; theme: ThemeMode }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraphMethods<Graph["nodes"][number], Graph["edges"][number]> | undefined>(undefined);
   const [size, setSize] = useState({ width: 900, height: 560 });
@@ -440,6 +475,21 @@ function NetworkGraph({ graph, mode }: { graph: Graph; mode: GraphMode }) {
       relatedNodeIds: related
     };
   }, [graph, hoveredNodeId, mode]);
+  const graphPalette = useMemo(() => ({
+    background: cssVariable("--graph-canvas", "#000000"),
+    activeNode: cssVariable("--signal", "#7C72FF"),
+    node: cssVariable("--signal-muted", "#AAA3FF"),
+    link: cssVariable("--graph-link", "rgba(124,114,255,0.30)"),
+    linkSoft: cssVariable("--graph-link-soft", "rgba(124,114,255,0.13)"),
+    linkFocus: cssVariable("--graph-link-focus", "rgba(170,163,255,0.70)"),
+    linkHidden: cssVariable("--graph-link-hidden", "rgba(124,114,255,0.025)"),
+    arrow: cssVariable("--graph-arrow", "rgba(170,163,255,0.55)"),
+    rootFill: cssVariable("--graph-root-fill", "#0A0B12"),
+    nodeFill: cssVariable("--graph-node-fill", "#05070B"),
+    rootText: cssVariable("--text", "#FFFFFF"),
+    nodeText: cssVariable("--graph-node-text", "#E1E1FE"),
+    border: cssVariable("--line-bright", "rgba(124,114,255,0.46)")
+  }), [theme]);
 
   useEffect(() => {
     const graphInstance = graphRef.current;
@@ -478,24 +528,22 @@ function NetworkGraph({ graph, mode }: { graph: Graph; mode: GraphMode }) {
         nodeId="id"
         linkSource="source"
         linkTarget="target"
-        backgroundColor="#000000"
+        backgroundColor={graphPalette.background}
         nodeLabel={(node) => node.label}
         nodeVal={(node) => node.type === "workspace" || node.role === "active" ? 10 : node.type === "module" ? 7 : 3}
-        nodeColor={(node) => node.type === "workspace" || node.role === "active" ? "#7C72FF" : "#AAA3FF"}
+        nodeColor={(node) => node.type === "workspace" || node.role === "active" ? graphPalette.activeNode : graphPalette.node}
         linkColor={(link) => {
-          if (!hoveredNodeId) return mode === "modules"
-            ? "rgba(124,114,255,0.30)"
-            : "rgba(124,114,255,0.13)";
+          if (!hoveredNodeId) return mode === "modules" ? graphPalette.link : graphPalette.linkSoft;
           return linkTouchesNode(link, hoveredNodeId)
-            ? "rgba(170,163,255,0.70)"
-            : "rgba(124,114,255,0.025)";
+            ? graphPalette.linkFocus
+            : graphPalette.linkHidden;
         }}
         linkWidth={(link) => {
           if (hoveredNodeId && !linkTouchesNode(link, hoveredNodeId)) return 0.25;
           return Math.min(3, 0.65 + Math.log2(link.weight + 1) * 0.5);
         }}
         linkDirectionalArrowLength={mode === "modules" ? 2.5 : 0}
-        linkDirectionalArrowColor={() => "rgba(170,163,255,0.55)"}
+        linkDirectionalArrowColor={() => graphPalette.arrow}
         warmupTicks={70}
         cooldownTicks={220}
         d3VelocityDecay={0.32}
@@ -517,7 +565,7 @@ function NetworkGraph({ graph, mode }: { graph: Graph; mode: GraphMode }) {
           if (!showLabel) {
             context.beginPath();
             context.arc(x, y, 3.2 / globalScale, 0, Math.PI * 2);
-            context.fillStyle = "#AAA3FF";
+            context.fillStyle = graphPalette.node;
             context.fill();
             context.globalAlpha = 1;
             return;
@@ -533,14 +581,14 @@ function NetworkGraph({ graph, mode }: { graph: Graph; mode: GraphMode }) {
           const paddingY = 4 / globalScale;
           const width = textWidth + paddingX * 2;
           const height = fontSize + paddingY * 2;
-          context.fillStyle = root ? "#0A0B12" : "#05070B";
-          context.strokeStyle = root ? "#7C72FF" : "rgba(124,114,255,0.46)";
+          context.fillStyle = root ? graphPalette.rootFill : graphPalette.nodeFill;
+          context.strokeStyle = root ? graphPalette.activeNode : graphPalette.border;
           context.lineWidth = (root ? 1.4 : 0.8) / globalScale;
           context.fillRect(x - width / 2, y - height / 2, width, height);
           context.strokeRect(x - width / 2, y - height / 2, width, height);
           context.textAlign = "center";
           context.textBaseline = "middle";
-          context.fillStyle = root ? "#FFFFFF" : "#E1E1FE";
+          context.fillStyle = root ? graphPalette.rootText : graphPalette.nodeText;
           context.fillText(label, x, y);
           context.globalAlpha = 1;
         }}
@@ -934,6 +982,13 @@ function EconomicsView({ projectPath }: { projectPath: string }) {
   if (metrics.loading) return <LoadingPanel label="Calculating token economics" />;
   if (metrics.error || !metrics.data) return <ErrorPanel message={metrics.error} />;
   const data = metrics.data;
+  const chartPalette = {
+    grid: cssVariable("--chart-grid", "rgba(255,255,255,0.08)"),
+    axis: cssVariable("--chart-axis", "rgba(255,255,255,0.50)"),
+    cursor: cssVariable("--signal-soft", "rgba(124,114,255,0.12)"),
+    tooltipBackground: cssVariable("--surface", "#080A0F"),
+    tooltipBorder: cssVariable("--line-bright", "rgba(124,114,255,0.46)")
+  };
   const chartData = [
     { strategy: "AST-first", tokens: data.astFirstTokens },
     { strategy: "Full text", tokens: data.fullTextTokens }
@@ -998,12 +1053,17 @@ function EconomicsView({ projectPath }: { projectPath: string }) {
                 <stop offset="100%" stopColor="#9333EA" />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-            <XAxis dataKey="strategy" stroke="rgba(255,255,255,0.50)" tickLine={false} axisLine={false} />
-            <YAxis stroke="rgba(255,255,255,0.50)" tickLine={false} axisLine={false} tickFormatter={compactNumber} />
+            <CartesianGrid stroke={chartPalette.grid} vertical={false} />
+            <XAxis dataKey="strategy" stroke={chartPalette.axis} tickLine={false} axisLine={false} />
+            <YAxis stroke={chartPalette.axis} tickLine={false} axisLine={false} tickFormatter={compactNumber} />
             <Tooltip
-              cursor={{ fill: "rgba(124,114,255,0.08)" }}
-              contentStyle={{ background: "#080A0F", border: "1px solid rgba(124,114,255,0.46)", fontFamily: "var(--ff-mono)" }}
+              cursor={{ fill: chartPalette.cursor }}
+              contentStyle={{
+                background: chartPalette.tooltipBackground,
+                border: `1px solid ${chartPalette.tooltipBorder}`,
+                color: cssVariable("--text", "#FFFFFF"),
+                fontFamily: "var(--ff-mono)"
+              }}
               formatter={(value) => [formatNumber(Number(value)), "tokens"]}
             />
             <Bar dataKey="tokens" fill="url(#infimiumBar)" radius={[2, 2, 0, 0]} />

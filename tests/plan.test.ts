@@ -1,6 +1,6 @@
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -109,6 +109,36 @@ describe("plan command", () => {
     expect(result.writtenPath).toBe(outputPath);
     expect(written).toContain("# Infimium plan");
     expect(written).toContain("## Plan");
+  });
+
+  it("writes relative plan output paths inside the target project", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "infimium-plan-project-"));
+    const result = await createPlan({
+      task: "add a doctor command",
+      writePlan: true,
+      outputPath: "plan.md",
+      recordMemory: false,
+      codebasePath: tempDir,
+      searcher: fakeSearcher([{
+        ...codeResult,
+        filePath: join(tempDir, "src", "commands", "doctor.ts")
+      }]),
+      depGraph: fakeDepGraph({
+        ...depGraphResult,
+        definedIn: join(tempDir, "src", "commands", "doctor.ts"),
+        importedBy: [join(tempDir, "src", "index.ts")]
+      }),
+      llmClient: {
+        async generate(): Promise<string> {
+          return "## Summary\nAdd doctor command safely.";
+        }
+      }
+    });
+
+    expect(result.writtenPath).toBe(resolve(tempDir, "plan.md"));
+    await expect(readFile(resolve(tempDir, "plan.md"), "utf8")).resolves.toContain(
+      "# Infimium plan"
+    );
   });
 
   it("prints the exact model pull command when the plan model is missing", () => {

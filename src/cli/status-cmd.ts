@@ -45,13 +45,21 @@ type InfimiumStatus = {
 type NumberRow = Record<string, number | bigint | null | undefined>;
 
 export async function runStatusCommand(options: StatusOptions = {}): Promise<void> {
-  const status = await readInfimiumStatus(options);
-  if (!status) {
+  const projectPath = options.projectPath ?? process.cwd();
+  const status = await readInfimiumStatus({
+    ...options,
+    projectPath
+  });
+  if (!status || !hasProjectIndexData(status)) {
     console.log("Not indexed. Run: infimium index");
     return;
   }
 
   console.log(formatStatus(status, options.nowMs));
+}
+
+function hasProjectIndexData(status: InfimiumStatus): boolean {
+  return status.docsFiles > 0 || status.codeFiles > 0 || status.importRelationships > 0;
 }
 
 export async function readInfimiumStatus(

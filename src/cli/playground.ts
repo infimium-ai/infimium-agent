@@ -63,13 +63,13 @@ export async function runPlaygroundCommand(
   }
 }
 
-function resolvePlaygroundDirectory(): string {
-  const currentDirectory = dirname(fileURLToPath(import.meta.url));
+export function resolvePlaygroundDirectory(
+  currentDirectory: string = dirname(fileURLToPath(import.meta.url)),
+  cwd: string = process.cwd()
+): string {
   const candidates = [
-    resolve(process.cwd(), "dist/playground-ui"),
-    join(currentDirectory, "../playground-ui"),
     resolve(currentDirectory, "../../playground-ui"),
-    resolve(currentDirectory, "../../dist/playground-ui")
+    resolve(cwd, "dist/playground-ui")
   ];
 
   return candidates.find(
