@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,13 +28,14 @@ export async function runPlaygroundCommand(
       `Playground build not found at ${staticDirectory}. Run: npm run build:playground`
     );
   }
+  const indexHtml = readFileSync(indexPath, "utf8");
 
   const app = express();
   app.disable("x-powered-by");
   app.use("/api", createPlaygroundRouter(options.projectPath ?? process.cwd()));
   app.use(express.static(staticDirectory, { index: false }));
   app.use((_request, response) => {
-    response.sendFile(indexPath);
+    response.type("html").send(indexHtml);
   });
 
   const port = await detectPort(options.preferredPort ?? DEFAULT_PLAYGROUND_PORT);
