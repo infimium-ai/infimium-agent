@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DepGraphBuilder } from "../src/indexer/dep-graph.js";
-import { DepGraphTool } from "../src/tools/dep-graph.js";
+import { DepGraphTool, formatDepGraphResult } from "../src/tools/dep-graph.js";
 
 const fixturesPath = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "property");
 const calcFilePath = join(fixturesPath, "services", "property", "calc.ts");
@@ -200,5 +200,31 @@ describe("dep graph", () => {
 
     expect(result.definedIn).toBe(sharedModelPath);
     expect(result.importedBy).toContain(appEntryPath);
+  });
+
+  it("does not leak graph rows from unrelated indexed projects with the same symbol name", async () => {
+    const appRoot = join(tempDir, "app");
+    const otherRoot = join(tempDir, "other");
+    await mkdir(join(appRoot, "lib"), { recursive: true });
+    await mkdir(join(otherRoot, "src"), { recursive: true });
+    const appMain = join(appRoot, "lib", "main.dart");
+    const otherIndex = join(otherRoot, "src", "index.ts");
+    await writeFile(appMain, "void main() { runApp(); }\nvoid runApp() {}\n", "utf8");
+    await writeFile(otherIndex, "export function main() { return startServer(); }\nfunction startServer() {}\n", "utf8");
+
+    const builder = new DepGraphBuilder(fakeClient(), sqlitePath);
+    await builder.buildGraph(appRoot);
+    await builder.buildGraph(otherRoot);
+    builder.close();
+
+    const tool = new DepGraphTool({ sqlitePath, codebasePath: appRoot });
+    const result = tool.query("main");
+    tool.close();
+    const output = formatDepGraphResult(result, appRoot);
+
+    expect(result.calls.map((call) => call.filePath)).toEqual([appMain]);
+    expect(output).toContain("lib/main.dart");
+    expect(output).not.toContain(otherRoot);
+    expect(output).not.toContain("/Users/");
   });
 });

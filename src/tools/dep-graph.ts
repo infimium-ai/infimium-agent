@@ -137,6 +137,7 @@ export class DepGraphTool {
       .all(filePath)
       .map(parseFilePathRow)
       .filter((row): row is FilePathRow => row !== null)
+      .filter((row) => this.isKnownProjectPath(row.file_path))
       .map((row) => row.file_path);
   }
 
@@ -146,6 +147,7 @@ export class DepGraphTool {
       .all(filePath)
       .map(parseFilePathRow)
       .filter((row): row is FilePathRow => row !== null)
+      .filter((row) => this.isKnownProjectPath(row.file_path))
       .map((row) => row.file_path);
   }
 
@@ -159,6 +161,7 @@ export class DepGraphTool {
       .all(symbolName)
       .map(parseSymbolCallRow)
       .filter((row): row is SymbolCallRow => row !== null)
+      .filter((row) => this.isKnownProjectPath(row.file_path))
       .map(toSymbolCallResult);
   }
 
@@ -172,6 +175,7 @@ export class DepGraphTool {
       .all(symbolName)
       .map(parseSymbolCallRow)
       .filter((row): row is SymbolCallRow => row !== null)
+      .filter((row) => this.isKnownProjectPath(row.file_path))
       .map(toSymbolCallResult);
   }
 
@@ -185,6 +189,7 @@ export class DepGraphTool {
       .all(symbolName)
       .map(parseHttpRouteRow)
       .filter((row): row is HttpRouteRow => row !== null)
+      .filter((row) => this.isKnownProjectPath(row.file_path))
       .map((row) => ({
         method: row.method,
         path: row.route_path,
@@ -192,6 +197,11 @@ export class DepGraphTool {
         lineStart: row.line_start,
         framework: row.framework
       }));
+  }
+
+  private isKnownProjectPath(filePath: string): boolean {
+    return this.projectPaths.length === 0 ||
+      this.projectPaths.some((projectPath) => isPathWithin(filePath, projectPath));
   }
 
   private getDb(): import("node:sqlite").DatabaseSync {
@@ -323,7 +333,7 @@ function displayPath(filePath: string, codebasePath?: string | null): string {
   if (project) {
     return `${project.id}:${relative(project.path, filePath)}`;
   }
-  return filePath;
+  return "[outside workspace]";
 }
 
 function normalizeSymbolName(symbolName: string): string {

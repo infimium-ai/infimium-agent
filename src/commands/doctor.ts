@@ -62,6 +62,7 @@ export async function runDoctorCommand(): Promise<void> {
 
 export async function collectDoctorChecks(): Promise<DoctorCheck[]> {
   const environment = loadConfigEnvironment();
+  const currentProjectPath = resolve(process.cwd());
 
   const packageJson = await readInfimiumPackageJson();
   const ollamaHost = normalizeBaseUrl(process.env.OLLAMA_HOST, DEFAULT_OLLAMA_HOST);
@@ -71,8 +72,8 @@ export async function collectDoctorChecks(): Promise<DoctorCheck[]> {
     await checkOllama(ollamaHost),
     await checkEmbeddingModel(ollamaHost),
     await checkEmbeddedVectorStore(),
-    checkConfigEnv(environment.loadedFiles),
-    checkIndexStatus()
+    checkConfigEnv(environment.loadedFiles, currentProjectPath),
+    checkIndexStatus(currentProjectPath)
   ];
 }
 
@@ -196,23 +197,21 @@ async function checkEmbeddedVectorStore(): Promise<DoctorCheck> {
   }
 }
 
-function checkConfigEnv(loadedFiles: string[]): DoctorCheck {
+function checkConfigEnv(loadedFiles: string[], activeProject: string): DoctorCheck {
   const source = loadedFiles.length > 0
     ? loadedFiles.join(", ")
     : "built-in defaults (no project .env required)";
   const searchStatus = process.env.SEARCH_API_KEY?.trim()
     ? "Tinyfish web search is configured."
     : "Web search is optional and currently disabled.";
-  const activeProject = resolve(process.env.CODEBASE_PATH?.trim() || process.cwd());
   return pass(
     "Config/env",
     `Using ${source}; active project is ${activeProject}. ${searchStatus}`
   );
 }
 
-function checkIndexStatus(): DoctorCheck {
+function checkIndexStatus(targetRepoPath: string): DoctorCheck {
   const codeDbPath = resolve(dataPath("infimium_code.db"));
-  const targetRepoPath = resolve(process.env.CODEBASE_PATH?.trim() || process.cwd());
 
   if (!existsSync(codeDbPath)) {
     return fail(

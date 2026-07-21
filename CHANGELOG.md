@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- Fixed packaged `infimium playground` static asset resolution.
+- Added the Infimium app logo to the Playground shell.
+- Added a persistent light/dark mode toggle for the Playground.
+
 ## 0.4.1
 
 - Added privacy-safe PostHog lifecycle telemetry with opt-out controls.
