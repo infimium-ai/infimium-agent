@@ -1,7 +1,6 @@
-import { ChromaClient } from "chromadb";
 import { resolve } from "node:path";
 
-import { createChromaClient } from "../chroma.js";
+import { createVectorClient } from "../vector-store.js";
 import { DEFAULT_OLLAMA_HOST } from "./query-local-docs.js";
 
 const COLLECTION_NAME = "infimium_code";
@@ -47,7 +46,7 @@ type CollectionLike = {
   query(args: QueryArgs): Promise<QueryResultLike>;
 };
 
-type ChromaClientLike = {
+type VectorClientLike = {
   getOrCreateCollection(args: {
     name: string;
     embeddingFunction: null;
@@ -57,12 +56,12 @@ type ChromaClientLike = {
 type CodeSearchOptions = {
   codebasePath: string | null;
   ollamaHost?: string;
-  chromaClient?: ChromaClientLike;
+  vectorClient?: VectorClientLike;
 };
 
 export class CodeSearchUnavailableError extends Error {
   constructor() {
-    super("Code search unavailable. Is ChromaDB running?");
+    super("Code search unavailable. Embedded vector index could not be opened.");
   }
 }
 
@@ -81,12 +80,12 @@ export class CodeSearchEmptyError extends Error {
 export class CodeSearchTool {
   private readonly codebasePath: string | null;
   private readonly ollamaHost: string;
-  private readonly chromaClient: ChromaClientLike;
+  private readonly vectorClient: VectorClientLike;
 
   constructor(options: CodeSearchOptions) {
     this.codebasePath = options.codebasePath ? resolve(options.codebasePath) : null;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
-    this.chromaClient = options.chromaClient ?? createChromaClient();
+    this.vectorClient = options.vectorClient ?? createVectorClient();
   }
 
   async search(
@@ -107,7 +106,7 @@ export class CodeSearchTool {
 
   private async getCollection(): Promise<CollectionLike> {
     try {
-      return await this.chromaClient.getOrCreateCollection({
+      return await this.vectorClient.getOrCreateCollection({
         name: COLLECTION_NAME,
         embeddingFunction: null
       });
@@ -261,7 +260,7 @@ function isConnectionError(error: unknown): boolean {
     message.includes("econnrefused") ||
     message.includes("connection refused") ||
     message.includes("failed to connect") ||
-    error.name === "ChromaConnectionError"
+    message.includes("sqlite")
   );
 }
 

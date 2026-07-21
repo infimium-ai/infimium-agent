@@ -1,6 +1,7 @@
-import { config as loadDotenv } from "dotenv";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
-loadDotenv();
+import { loadConfigEnvironment } from "./env.js";
 
 export interface Config {
   searchApiKey: string;
@@ -64,7 +65,7 @@ function readShellAllowlist(env: NodeJS.ProcessEnv): string[] {
   const value = env.SHELL_ALLOWLIST?.trim();
 
   if (!value) {
-    return [];
+    return ["ls", "git", "pwd", "npm", "npx"];
   }
 
   return value
@@ -78,13 +79,17 @@ function readOllamaHost(env: NodeJS.ProcessEnv): string {
 }
 
 export function loadConfig(options: LoadConfigOptions = {}): Config {
+  loadConfigEnvironment();
   const requireSearchApiKey = options.requireSearchApiKey ?? true;
+  const codebasePath = readOptionalPath(process.env, "CODEBASE_PATH") ?? process.cwd();
+  const configuredDocsPath = readOptionalPath(process.env, "LOCAL_DOCS_PATH");
+  const defaultDocsPath = resolve(codebasePath, "docs");
 
   return {
     searchApiKey: readSearchApiKey(process.env, requireSearchApiKey),
     searchProvider: readSearchProvider(process.env),
-    localDocsPath: readOptionalPath(process.env, "LOCAL_DOCS_PATH"),
-    codebasePath: readOptionalPath(process.env, "CODEBASE_PATH"),
+    localDocsPath: configuredDocsPath ?? (existsSync(defaultDocsPath) ? defaultDocsPath : codebasePath),
+    codebasePath,
     ollamaHost: readOllamaHost(process.env),
     shellAllowlist: readShellAllowlist(process.env)
   };

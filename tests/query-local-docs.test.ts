@@ -26,7 +26,7 @@ describe("LocalDocsSearch", () => {
     vi.unstubAllGlobals();
   });
 
-  it("formats ChromaDB results", async () => {
+  it("formats embedded vector results", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(embeddingResponse()));
     const collection = {
       count: vi.fn().mockResolvedValue(2),
@@ -39,7 +39,7 @@ describe("LocalDocsSearch", () => {
 
     const chromaClient = fakeClient(collection);
     const output = await runQueryLocalDocs(
-      { localDocsPath: "/docs", chromaClient },
+      { localDocsPath: "/docs", vectorClient: chromaClient },
       "setup",
       1
     );
@@ -75,7 +75,7 @@ describe("LocalDocsSearch", () => {
     };
 
     const output = await runQueryLocalDocs(
-      { localDocsPath: "/docs", chromaClient: fakeClient(collection) },
+      { localDocsPath: "/docs", vectorClient: fakeClient(collection) },
       "topic",
       5
     );
@@ -92,7 +92,7 @@ describe("LocalDocsSearch", () => {
     };
 
     const output = await runQueryLocalDocs(
-      { localDocsPath: "/docs", chromaClient: fakeClient(collection) },
+      { localDocsPath: "/docs", vectorClient: fakeClient(collection) },
       "setup",
       5
     );
@@ -107,7 +107,7 @@ describe("LocalDocsSearch", () => {
     };
 
     const output = await runQueryLocalDocs(
-      { localDocsPath: null, chromaClient: fakeClient(collection) },
+      { localDocsPath: null, vectorClient: fakeClient(collection) },
       "setup",
       5
     );
@@ -116,32 +116,32 @@ describe("LocalDocsSearch", () => {
     expect(collection.count).not.toHaveBeenCalled();
   });
 
-  it("returns the ChromaDB unavailable message", async () => {
+  it("returns the embedded vector store unavailable message", async () => {
     const chromaClient = {
       getOrCreateCollection: vi.fn().mockRejectedValue(new Error("ECONNREFUSED 127.0.0.1:8000"))
     };
 
     const output = await runQueryLocalDocs(
-      { localDocsPath: "/docs", chromaClient },
+      { localDocsPath: "/docs", vectorClient: chromaClient },
       "setup",
       5
     );
 
-    expect(output).toBe("Local docs unavailable. Is ChromaDB running?");
+    expect(output).toBe("Local docs unavailable. Embedded vector index could not be opened.");
   });
 
-  it("returns the ChromaDB unavailable message when collection operations fail", async () => {
+  it("returns the embedded vector store message when collection operations fail", async () => {
     const collection = {
       count: vi.fn().mockRejectedValue(new Error("connection refused")),
       query: vi.fn()
     };
 
     const output = await runQueryLocalDocs(
-      { localDocsPath: "/docs", chromaClient: fakeClient(collection) },
+      { localDocsPath: "/docs", vectorClient: fakeClient(collection) },
       "setup",
       5
     );
 
-    expect(output).toBe("Local docs unavailable. Is ChromaDB running?");
+    expect(output).toBe("Local docs unavailable. Embedded vector index could not be opened.");
   });
 });

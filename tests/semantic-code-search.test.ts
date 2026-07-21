@@ -47,7 +47,7 @@ describe("CodeSearchTool", () => {
       {
         codebasePath: "/code",
         ollamaHost: "http://ollama.test",
-        chromaClient: fakeClient(collection)
+        vectorClient: fakeClient(collection)
       },
       "price calculation logic",
       "typescript",
@@ -71,7 +71,7 @@ describe("CodeSearchTool", () => {
     });
   });
 
-  it("keeps scores nonzero for Chroma distances above one", async () => {
+  it("keeps scores nonzero for vector distances above one", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(embeddingResponse()));
     const collection = {
       count: vi.fn().mockResolvedValue(1),
@@ -92,7 +92,7 @@ describe("CodeSearchTool", () => {
       {
         codebasePath: "/code",
         ollamaHost: "http://ollama.test",
-        chromaClient: fakeClient(collection)
+        vectorClient: fakeClient(collection)
       },
       "context layer",
       undefined,
@@ -109,7 +109,7 @@ describe("CodeSearchTool", () => {
     };
 
     const output = await runSemanticCodeSearch(
-      { codebasePath: null, chromaClient: fakeClient(collection) },
+      { codebasePath: null, vectorClient: fakeClient(collection) },
       "price calculation logic",
       undefined,
       5
@@ -127,7 +127,7 @@ describe("CodeSearchTool", () => {
     };
 
     const output = await runSemanticCodeSearch(
-      { codebasePath: "/code", chromaClient: fakeClient(collection) },
+      { codebasePath: "/code", vectorClient: fakeClient(collection) },
       "price calculation logic",
       undefined,
       5
@@ -136,18 +136,18 @@ describe("CodeSearchTool", () => {
     expect(output).toBe("Code not indexed. Run: infimium index");
   });
 
-  it("returns the ChromaDB unavailable message", async () => {
+  it("returns the embedded vector store unavailable message", async () => {
     const chromaClient = {
       getOrCreateCollection: vi.fn().mockRejectedValue(new Error("ECONNREFUSED 127.0.0.1:8000"))
     };
 
     const output = await runSemanticCodeSearch(
-      { codebasePath: "/code", chromaClient },
+      { codebasePath: "/code", vectorClient: chromaClient },
       "price calculation logic",
       undefined,
       5
     );
 
-    expect(output).toBe("Code search unavailable. Is ChromaDB running?");
+    expect(output).toBe("Code search unavailable. Embedded vector index could not be opened.");
   });
 });

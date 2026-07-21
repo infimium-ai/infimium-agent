@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 
-import { ChromaClient, type Metadata } from "chromadb";
 import { glob } from "glob";
 
-import { createChromaClient } from "../chroma.js";
 import type { Config } from "../config.js";
 import { dataPath } from "../paths.js";
+import { createVectorClient, type VectorMetadata } from "../vector-store.js";
 import { CodeParser, type CodeSymbol } from "./code-parser.js";
 import { DepGraphBuilder, DEP_GRAPH_DB_PATH } from "./dep-graph.js";
 import {
@@ -29,7 +29,7 @@ export type CodeIndexStats = {
   filesPruned: number;
 };
 
-type CodeMetadata = Metadata & {
+type CodeMetadata = VectorMetadata & {
   name: string;
   type: CodeSymbol["type"];
   filePath: string;
@@ -50,7 +50,7 @@ type IndexedCodeFileRow = {
 type CollectionLike = {
   delete(args: { where: { filePath: string } }): Promise<unknown>;
   get(args: { include: Array<"metadatas"> }): Promise<{
-    metadatas?: Array<CodeMetadata | null>;
+    metadatas?: Array<Record<string, unknown> | null>;
   }>;
   upsert(args: {
     ids: string[];
@@ -60,7 +60,7 @@ type CollectionLike = {
   }): Promise<unknown>;
 };
 
-type ChromaClientLike = {
+type VectorClientLike = {
   getOrCreateCollection(args: {
     name: string;
     embeddingFunction: null;
@@ -68,7 +68,7 @@ type ChromaClientLike = {
 };
 
 export class CodeIndexer {
-  private readonly chroma: ChromaClientLike;
+  private readonly vectors: VectorClientLike;
   private readonly ollamaHost: string;
   private readonly parser: CodeParser;
   private readonly sqlitePath: string;
@@ -76,12 +76,12 @@ export class CodeIndexer {
 
   constructor(
     config: Pick<Config, "ollamaHost">,
-    chromaClient: ChromaClientLike = createChromaClient(),
+    vectorClient: VectorClientLike = createVectorClient(),
     parser: CodeParser = new CodeParser(),
     sqlitePath: string = SQLITE_DB_PATH,
     private readonly depGraphSqlitePath: string = DEP_GRAPH_DB_PATH
   ) {
-    this.chroma = chromaClient;
+    this.vectors = vectorClient;
     this.ollamaHost = config.ollamaHost;
     this.parser = parser;
     this.sqlitePath = resolve(sqlitePath);
@@ -100,9 +100,10 @@ export class CodeIndexer {
 
     this.initializeDb();
     stats.filesPruned = await this.pruneStaleFiles(collection, rootPath, filePaths);
+    const vectorFilePaths = await this.readVectorFilePaths(collection);
 
     for (const filePath of filePaths) {
-      const result = await this.indexFile(collection, filePath, rootPath);
+      const result = await this.indexFile(collection, filePath, rootPath, vectorFilePaths);
       if (result.skipped) {
         stats.filesSkipped += 1;
         continue;
@@ -112,7 +113,7 @@ export class CodeIndexer {
       stats.symbolsIndexed += result.symbolsIndexed;
     }
 
-    const depGraphBuilder = new DepGraphBuilder(this.chroma, this.depGraphSqlitePath);
+    const depGraphBuilder = new DepGraphBuilder(this.vectors, this.depGraphSqlitePath);
     try {
       await depGraphBuilder.buildGraph(rootPath);
     } finally {
@@ -128,7 +129,7 @@ export class CodeIndexer {
   }
 
   private async getCollection(): Promise<CollectionLike> {
-    return this.chroma.getOrCreateCollection({
+    return this.vectors.getOrCreateCollection({
       name: COLLECTION_NAME,
       embeddingFunction: null
     });
@@ -136,7 +137,7 @@ export class CodeIndexer {
 
   private async findCodeFiles(rootPath: string): Promise<string[]> {
     const policy = await createProjectFilePolicy(rootPath);
-    const matches = await glob("**/*.{ts,tsx,js,jsx,py,dart}", {
+    const matches = await glob("**/*.{ts,tsx,js,jsx,py,dart,go,rs,java}", {
       cwd: rootPath,
       absolute: true,
       nodir: true,
@@ -178,16 +179,17 @@ export class CodeIndexer {
   private async indexFile(
     collection: CollectionLike,
     filePath: string,
-    projectPath: string
+    projectPath: string,
+    vectorFilePaths: Set<string>
   ): Promise<{ skipped: boolean; symbolsIndexed: number }> {
     const content = await readFile(filePath, "utf8");
     const contentHash = hashContent(content);
 
-    if (this.isUnchanged(filePath, contentHash)) {
+    if (this.isUnchanged(filePath, contentHash, vectorFilePaths)) {
       return { skipped: true, symbolsIndexed: 0 };
     }
 
-    const symbols = this.parser.parseFile(filePath);
+    const symbols = await this.parser.parseFileAsync(filePath);
     await collection.delete({ where: { filePath } });
 
     if (symbols.length > 0) {
@@ -197,6 +199,16 @@ export class CodeIndexer {
     this.upsertIndexedCodeFile(filePath, contentHash, symbols.length);
 
     return { skipped: false, symbolsIndexed: symbols.length };
+  }
+
+  private async readVectorFilePaths(collection: CollectionLike): Promise<Set<string>> {
+    const result = await collection.get({ include: ["metadatas"] });
+    return new Set(
+      (result.metadatas ?? [])
+        .map((metadata) => metadata?.filePath)
+        .filter((filePath): filePath is string => typeof filePath === "string")
+        .map(canonicalFilePath)
+    );
   }
 
   private async storeSymbols(
@@ -256,7 +268,11 @@ export class CodeIndexer {
     return body.embedding;
   }
 
-  private isUnchanged(filePath: string, contentHash: string): boolean {
+  private isUnchanged(
+    filePath: string,
+    contentHash: string,
+    vectorFilePaths: Set<string>
+  ): boolean {
     const row = this.getDb()
       .prepare(
         "SELECT file_path, content_hash, indexed_at, symbol_count FROM indexed_code_files WHERE file_path = ?"
@@ -264,7 +280,9 @@ export class CodeIndexer {
       .get(filePath);
     const indexedFile = parseIndexedCodeFileRow(row);
 
-    return indexedFile?.content_hash === contentHash;
+    return indexedFile?.content_hash === contentHash && (
+      indexedFile.symbol_count === 0 || vectorFilePaths.has(canonicalFilePath(filePath))
+    );
   }
 
   private upsertIndexedCodeFile(
@@ -340,6 +358,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isWithinRoot(filePath: string, rootPath: string): boolean {
-  const relativePath = relative(rootPath, filePath);
+  const relativePath = relative(canonicalFilePath(rootPath), canonicalFilePath(filePath));
   return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+function canonicalFilePath(filePath: string): string {
+  const resolvedPath = resolve(filePath);
+  try {
+    return realpathSync.native(resolvedPath);
+  } catch {
+    try {
+      return resolve(realpathSync.native(dirname(resolvedPath)), basename(resolvedPath));
+    } catch {
+      return resolvedPath;
+    }
+  }
 }

@@ -4,7 +4,7 @@
 
 # Infimium
 
-Private context layer for AI agents. Web search, local docs, semantic code search, dependency graph, memory, and planning from one MCP server on your machine.
+Private context layer for AI coding agents. Search code and docs, inspect dependencies, preserve project memory, and build grounded plans from one local MCP server.
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -14,11 +14,9 @@ Private context layer for AI agents. Web search, local docs, semantic code searc
 
 [![Infimium demo](docs/assets/infimium-demo.gif)](docs/assets/infimium-demo.mp4)
 
-[Watch the full demo video](docs/assets/infimium-demo.mp4)
-
 ## Why
 
-Agents lose context when repos get big. They either read too much, burn tokens, or miss the real function because keyword search is not enough.
+Large repositories make agents read too much code or miss the right symbol. Infimium retrieves compact, relevant context before the agent starts editing.
 
 ```text
 200,000 lines of code
@@ -26,251 +24,202 @@ Agent reads everything -> context blown + expensive
 grep "price calculation" -> misses calcPropertyValue()
 ```
 
-With Infimium, the agent asks targeted tools first:
-
 ```text
 tool: semantic_code_search
 query: "price calculation logic"
 
 -> services/property/calc.ts:142 · calcPropertyValue()
--> imported by: listing.ts, tax.ts, pdf-generator.ts, calc.test.ts
+-> callers: getListingPrice(), estimatePropertyTax()
 ```
 
-## What Works Now
+## 1,460 Tokens -> 8
 
-- MCP server with 11 tools.
-- CLI for the same tools.
-- Local code/doc indexing with Ollama + ChromaDB for JavaScript, TypeScript, Python, and Dart.
-- Dependency graph from imports.
-- Automatic exclusion of build output, dependencies, caches, Flutter artifacts, and binaries.
-- Auto-index while the MCP server runs.
-- Project memory across chats, agents, and IDEs.
-- Project-scoped YAML context with repo overview, task, Git state, and index health.
-- Workspace federation for related repositories without mixing their memory or Git state.
-- Setup checker with copy-paste fixes: `npx infimium doctor`.
+Infimium drops the initial payload cost from approximately **1,460 tokens to 8 tokens per symbol**. Semantic search returns the AST signature first; the agent requests the full implementation only when it needs it with `expand_symbol`.
+
+```text
+Full implementation   ~1,460 tokens
+AST skeleton               ~8 tokens
+Initial payload reduction  ~99.5%
+```
+
+These are Playground reference values, not a claim that every function has the same size. Inspect your own indexed repository and compare AST-first retrieval with full-text retrieval locally:
+
+```bash
+infimium playground
+```
+
+Open **Token Economics** to see the estimated token difference across your actual indexed symbols.
 
 ## Quick Start
 
-Beginner path: install Docker, then run one command.
+Requires Node.js 22.5+ and [Ollama](https://ollama.com/).
 
 ```bash
-git clone https://github.com/infimium-ai/infimium-agent.git
-cd infimium-agent
-./scripts/setup.sh
+npm install -g infimium
+ollama serve
+ollama pull nomic-embed-text
+cd /path/to/your/project
+infimium init
+infimium index
+infimium doctor
 ```
 
-This creates `.env`, starts ChromaDB/Ollama, pulls `nomic-embed-text`, indexes the repo, and prints MCP config.
+`infimium init` creates one global config at `~/.infimium/.env`. You do not need a `.env` in every project. Code, docs, memory, graphs, and vectors are stored locally under `~/.infimium/`.
 
-Optional web search:
+Web search is optional. Add a Tinyfish key only when you need it:
 
 ```env
 SEARCH_PROVIDER=tinyfish
-SEARCH_API_KEY=your_tinyfish_key
+SEARCH_API_KEY=your_key
 ```
 
-No search key? Fine. Code search, docs search, dep graph, memory, context, fetch, shell, status, and doctor still work.
+Full `infimium plan` generation also needs a local text model:
 
-Infimium respects `.gitignore`. Add optional project-specific exclusions to `.infimiumignore`.
+```bash
+ollama pull llama3.1
+```
 
-## Connect To Cursor, Windsurf, Or Claude
+`infimium plan --dry-run "your task"` works without this model and shows the retrieved code context first.
 
-Use the config printed by `./scripts/setup.sh`, or paste this and change the path:
+## Connect Your Agent
+
+Cursor, Windsurf, Claude Desktop, and other MCP clients:
 
 ```json
 {
   "mcpServers": {
     "infimium": {
       "command": "npx",
-      "args": ["infimium", "serve"],
-      "env": {
-        "CODEBASE_PATH": "/absolute/path/to/your/repo",
-        "LOCAL_DOCS_PATH": "/absolute/path/to/your/repo/docs",
-        "CHROMADB_HOST": "http://localhost:8000",
-        "OLLAMA_HOST": "http://localhost:11434",
-        "SHELL_ALLOWLIST": "ls,git,pwd,npm,npx"
-      }
+      "args": ["-y", "infimium", "serve"]
     }
   }
 }
 ```
 
-Restart your IDE after editing MCP config.
-
-First prompt to test:
+Restart the client, then use:
 
 ```text
 Use Infimium hello_infimium.
 Use Infimium get_context before starting.
-Use Infimium semantic_code_search to explain this repo.
+Use Infimium semantic_code_search to explain this repository.
 ```
 
-If the agent is in a different workspace than the MCP server, ask it to pass `project_path` once. Infimium remembers that as the active project.
+Infimium normally uses the MCP process working directory. If your client starts it elsewhere, pass `project_path` once; Infimium remembers the active project and auto-indexes it.
 
 ## Tools
 
-| Tool | Use |
+| Tool | What it does |
 | --- | --- |
-| `hello_infimium` | Health check. Returns `hey-dude`. |
-| `web_search` | Tinyfish web search. Requires `SEARCH_API_KEY`. |
-| `fetch_url` | Fetch a URL and extract readable Markdown/text. |
-| `query_local_docs` | Search indexed `.md`, `.txt`, `.html`, and `.pdf` docs. |
-| `semantic_code_search` | Search code by meaning and return compact symbol signatures. |
-| `expand_symbol` | Load one full implementation after semantic search identifies it. |
-| `dep_graph` | Find where a symbol is defined, who imports it, and what it imports. |
-| `shell` | Run allowlisted shell commands with timeout and output caps. |
-| `plan` | Build a grounded implementation plan from code search + dep graph context. |
-| `project_memory` | Save or resume task notes across chats and IDEs. |
-| `get_context` | Return compact repo context: task, memory, index health, git changes, touched files. |
+| `hello_infimium` | Confirms the MCP server is healthy. |
+| `get_context` | Loads compact YAML project context, Git state, task, and memory. |
+| `semantic_code_search` | Finds code by meaning and returns symbol signatures first. |
+| `expand_symbol` | Loads one full implementation only when needed. |
+| `query_local_docs` | Searches local Markdown, text, HTML, and PDF files. |
+| `dep_graph` | Shows imports, callers, callees, and HTTP routes for a symbol. |
+| `project_memory` | Saves progress, decisions, tasks, and blockers across agents. |
+| `plan` | Builds a grounded implementation plan from code and graph context. |
+| `web_search` | Searches the web through optional Tinyfish configuration. |
+| `fetch_url` | Extracts readable Markdown or text from a URL. |
+| `shell` | Runs allowlisted commands with timeouts and output limits. |
 
 ## CLI
 
 ```bash
-npx infimium doctor
-npx infimium status
-npx infimium index
-npx infimium workspace show
-npx infimium watch
-npx infimium hello
-npx infimium search "latest MCP registry news"
-npx infimium fetch https://example.com
-npx infimium code-search "context layer writer"
-npx infimium expand-symbol ContextLayerWriter
-npx infimium docs-search "setup"
-npx infimium dep-graph startServer
-npx infimium plan --dry-run "add rate limiting"
-npx infimium remember "Finished setup" --type progress --task "Launch prep"
-npx infimium resume
-npx infimium get-context                    # YAML by default
-npx infimium get-context --format json      # optional compatibility output
+infimium doctor
+infimium status
+infimium playground
+infimium index
+infimium watch
+infimium get-context
+infimium code-search "authentication middleware"
+infimium expand-symbol authenticateUser
+infimium docs-search "deployment setup"
+infimium dep-graph authenticateUser
+infimium plan --dry-run "add rate limiting"
+infimium remember "Rate limiter tests pass" --type progress --task "Rate limiting"
+infimium resume
 ```
+
+Use `npx infimium ...` if you did not install the package globally.
+
+From a source checkout, build once and run the local playground with:
+
+```bash
+npm run build
+npm run playground
+```
+
+## Local Architecture
+
+- Ollama creates embeddings on your machine.
+- Embedded SQLite stores vectors, index metadata, project memory, and graph edges. No ChromaDB or Docker service is required.
+- Documents use recursive boundary-aware chunks instead of blind fixed slices.
+- JavaScript, TypeScript, Python, and Dart parsers are bundled.
+- Go, Rust, and Java Tree-sitter WASM grammars download on first use and cache in `~/.infimium/grammars/`.
+- `.gitignore`, `.infimiumignore`, and framework defaults exclude dependencies, build output, Flutter artifacts, caches, and binaries before indexing.
+- `semantic_code_search` returns signatures; `expand_symbol` provides full code on demand.
 
 ## Multiple Projects
 
-From the directory containing your related repositories:
+Run the normal index command from a folder containing related projects:
 
 ```bash
-npx infimium workspace init ./UserApp ./BrandApp ./supabase --name "klubEATS"
+infimium index
 ```
 
-Edit the generated `infimium.workspace.json` to describe relationships:
+Infimium detects immediate project roots from files such as `pubspec.yaml`, `package.json`, `Cargo.toml`, and `go.mod`. It shows the detected roles and dependencies, asks once, then creates `infimium.workspace.json`, indexes every project, and opens Playground.
 
-```json
-{
-  "schemaVersion": 1,
-  "name": "klubEATS",
-  "projects": [
-    { "id": "userapp", "path": "./UserApp", "role": "client", "dependsOn": ["supabase"] },
-    { "id": "supabase", "path": "./supabase", "role": "backend", "dependsOn": [] }
-  ]
-}
-```
-
-Run `npx infimium index`. `get_context` then returns full context for the current project plus compressed summaries and graph edges for related projects.
-
-Check health:
+For unattended setup:
 
 ```bash
-npx infimium doctor
+infimium index --yes --no-playground
 ```
 
-Expected shape:
-
-```text
-1. ✅ Node/npm version
-2. ✅ Ollama
-3. ✅ Required embedding model
-4. ✅ ChromaDB
-5. ✅ Config/env
-6. ✅ Index status
-Summary: 6/6 checks passed
-```
-
-## Manual Local Setup
-
-Use this only if Docker setup fails.
-
-```bash
-npm install
-cp .env.example .env
-docker compose up -d chromadb
-ollama serve
-ollama pull nomic-embed-text
-npm run build
-npx infimium index
-npx infimium doctor
-```
-
-Minimal `.env`:
-
-```env
-SEARCH_PROVIDER=tinyfish
-SEARCH_API_KEY=
-LOCAL_DOCS_PATH=./docs
-CODEBASE_PATH=.
-SHELL_ALLOWLIST=ls,git,pwd,npm,npx
-OLLAMA_HOST=http://localhost:11434
-CHROMADB_HOST=http://localhost:8000
-INFIMIUM_AUTO_INDEX=true
-```
-
-## If Setup Fails
-
-Paste this into Cursor, Claude Code, Codex, or any coding agent:
-
-```text
-Set up Infimium in this repo.
-
-Run ./scripts/setup.sh. If it fails, fix the missing dependency.
-Make .env exist.
-Start ChromaDB.
-Start Ollama.
-Pull nomic-embed-text.
-Run npx infimium index.
-Run npx infimium doctor and make all 6 checks pass.
-Show me the MCP JSON for this machine.
-Do not commit secrets.
-```
-
-## How The Context Layer Works
-
-Infimium indexes your repo into:
-
-- SQLite: index metadata, project memory, dependency graph.
-- ChromaDB: local vector search over docs and code symbols.
-- `context/<projectId>/layer.md`: compact YAML handoff for the active project.
-
-The context includes a centralized repo overview, current task, recent memory, project-only index health, and a capped summary of relevant Git activity. In a workspace, related projects contribute only compressed summaries and graph edges, so tasks and working trees never overlap. When `infimium serve` is running, it refreshes every 5 minutes and auto-indexes changed files. A fresh agent should call `get_context` first, use `semantic_code_search` for signatures, and call `expand_symbol` only when full code is required.
+Use `--no-workspace` to index only the current project. Workspace projects keep separate memory and Git state while `get_context` includes compact summaries and graph relationships from related projects.
 
 ## Privacy
 
-Self-hosted means your code index, embeddings, docs, dependency graph, and memory stay on your machine.
+Code, docs, embeddings, memory, graph data, prompts, queries, file paths, and repo names remain local.
 
-- Embeddings run locally with Ollama.
-- ChromaDB and SQLite run locally.
-- Web search only sends the search query to your configured provider.
-- Telemetry is off unless configured in a future release.
+Infimium sends privacy-safe anonymous lifecycle telemetry so we can understand setup success:
 
-## Upcoming MCP Tools
+- `init_started`, `init_completed`
+- `doctor_run`, `doctor_passed`
+- `index_started`, `index_completed`, `setup_completed`
+- `serve_started`, `first_tool_call`, `playground_opened`
 
-`code_review` — review a change and its graph-connected impact, not the entire repository.
+Telemetry includes an anonymous install ID, Infimium version, OS, Node major version, timestamp, and event name. It never includes code, file paths, repo names, prompts, search queries, memory notes, API keys, or user identity.
 
-It extends the Infimium context layer by combining semantic code search, dependency graph context, and changed-file detection. The goal is grounded reviews with less unnecessary context usage across Cursor, Claude, Codex, Windsurf, and other MCP-compatible agents.
+Disable it anytime:
 
-## Paid Hosted Glimpse
+```bash
+infimium telemetry off
+```
 
-Self-host is free forever under MIT.
+or set:
 
-Hosted Infimium will focus on:
+```env
+INFIMIUM_TELEMETRY=false
+```
 
-- managed indexing for teams,
-- shared project memory,
-- larger repo indexing workers,
-- team dashboards for index health and tool usage.
+## Troubleshooting
+
+Run:
+
+```bash
+infimium doctor
+```
+
+Every failed check prints one copy-paste fix. If setup still fails, give this prompt to your coding agent:
+
+```text
+Set up Infimium in this repository. Install/start Ollama, pull nomic-embed-text,
+run npx infimium init, run npx infimium index, and make all six
+npx infimium doctor checks pass. Do not commit secrets.
+```
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md)
+See [CONTRIBUTING.md](CONTRIBUTING.md). Adding a language starts with a parser fixture and extraction test.
 
-Adding a new language? Start there.
-
-Future architecture work is tracked in [docs/roadmap.md](docs/roadmap.md).
+Self-hosting is free forever under the MIT license.

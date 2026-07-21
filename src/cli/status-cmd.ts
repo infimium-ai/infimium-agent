@@ -2,8 +2,8 @@ import { existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 
-import { createChromaClient } from "../chroma.js";
 import { dataPath } from "../paths.js";
+import { createVectorClient } from "../vector-store.js";
 
 const DOCS_DB_PATH = dataPath("infimium_docs.db");
 const CODE_DB_PATH = dataPath("infimium_code.db");
@@ -14,19 +14,19 @@ const require = createRequire(import.meta.url);
 
 type Database = import("node:sqlite").DatabaseSync;
 
-type ChromaCollectionLike = {
+type VectorCollectionLike = {
   count(): Promise<number>;
 };
 
-type ChromaClientLike = {
-  getCollection(args: { name: string }): Promise<ChromaCollectionLike>;
+type VectorClientLike = {
+  getCollection(args: { name: string }): Promise<VectorCollectionLike>;
 };
 
 type StatusOptions = {
   docsDbPath?: string;
   codeDbPath?: string;
   graphDbPath?: string;
-  chromaClient?: ChromaClientLike;
+  vectorClient?: VectorClientLike;
   nowMs?: number;
   projectPath?: string;
 };
@@ -45,13 +45,21 @@ type InfimiumStatus = {
 type NumberRow = Record<string, number | bigint | null | undefined>;
 
 export async function runStatusCommand(options: StatusOptions = {}): Promise<void> {
-  const status = await readInfimiumStatus(options);
-  if (!status) {
+  const projectPath = options.projectPath ?? process.cwd();
+  const status = await readInfimiumStatus({
+    ...options,
+    projectPath
+  });
+  if (!status || !hasProjectIndexData(status)) {
     console.log("Not indexed. Run: infimium index");
     return;
   }
 
   console.log(formatStatus(status, options.nowMs));
+}
+
+function hasProjectIndexData(status: InfimiumStatus): boolean {
+  return status.docsFiles > 0 || status.codeFiles > 0 || status.importRelationships > 0;
 }
 
 export async function readInfimiumStatus(
@@ -69,16 +77,16 @@ export async function readInfimiumStatus(
   const docsStats = readDocsStats(docsDbPath, projectPath);
   const codeStats = readCodeStats(codeDbPath, projectPath);
   const graphStats = readGraphStats(graphDbPath, projectPath);
-  const chromaChunks = projectPath
+  const vectorChunks = projectPath
     ? null
-    : await readChromaCollectionCount(
-        options.chromaClient ?? createChromaClient(),
+    : await readVectorCollectionCount(
+        options.vectorClient ?? createVectorClient(),
         DOCS_COLLECTION_NAME
       );
 
   return {
     docsFiles: docsStats.files,
-    docsChunks: chromaChunks ?? docsStats.chunks,
+    docsChunks: vectorChunks ?? docsStats.chunks,
     codeSymbols: codeStats.symbols,
     codeFiles: codeStats.files,
     importRelationships: graphStats.importRelationships,
@@ -166,15 +174,35 @@ function readGraphStats(
   projectPath: string | null
 ): { importRelationships: number; watchedProjects: number } {
   return withExistingDb(dbPath, (db) => ({
-    importRelationships: tableExists(db, "file_imports")
-      ? projectPath
-        ? readParameterizedCount(
-            db,
-            "SELECT COUNT(*) AS count FROM file_imports WHERE source_file = ? OR source_file LIKE ?",
-            [projectPath, `${projectPath}/%`]
-          )
-        : readCount(db, "SELECT COUNT(*) AS count FROM file_imports")
-      : 0,
+    importRelationships: [
+      tableExists(db, "file_imports")
+        ? projectPath
+          ? readParameterizedCount(
+              db,
+              "SELECT COUNT(*) AS count FROM file_imports WHERE source_file = ? OR source_file LIKE ?",
+              [projectPath, `${projectPath}/%`]
+            )
+          : readCount(db, "SELECT COUNT(*) AS count FROM file_imports")
+        : 0,
+      tableExists(db, "symbol_calls")
+        ? projectPath
+          ? readParameterizedCount(
+              db,
+              "SELECT COUNT(*) AS count FROM symbol_calls WHERE caller_file = ? OR caller_file LIKE ?",
+              [projectPath, `${projectPath}/%`]
+            )
+          : readCount(db, "SELECT COUNT(*) AS count FROM symbol_calls")
+        : 0,
+      tableExists(db, "http_routes")
+        ? projectPath
+          ? readParameterizedCount(
+              db,
+              "SELECT COUNT(*) AS count FROM http_routes WHERE file_path = ? OR file_path LIKE ?",
+              [projectPath, `${projectPath}/%`]
+            )
+          : readCount(db, "SELECT COUNT(*) AS count FROM http_routes")
+        : 0
+    ].reduce((total, count) => total + count, 0),
     watchedProjects: readWatchedProjectCount(db)
   })) ?? { importRelationships: 0, watchedProjects: 0 };
 }
@@ -196,12 +224,12 @@ function readWatchedProjectCount(db: Database): number {
   );
 }
 
-async function readChromaCollectionCount(
-  chromaClient: ChromaClientLike,
+async function readVectorCollectionCount(
+  vectorClient: VectorClientLike,
   collectionName: string
 ): Promise<number | null> {
   try {
-    const collection = await chromaClient.getCollection({ name: collectionName });
+    const collection = await vectorClient.getCollection({ name: collectionName });
     return collection.count();
   } catch {
     return null;

@@ -1,7 +1,6 @@
-import { ChromaClient } from "chromadb";
 import { resolve } from "node:path";
 
-import { createChromaClient } from "../chroma.js";
+import { createVectorClient } from "../vector-store.js";
 
 const COLLECTION_NAME = "infimium_docs";
 export const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
@@ -36,7 +35,7 @@ type CollectionLike = {
   }): Promise<QueryResultLike>;
 };
 
-type ChromaClientLike = {
+type VectorClientLike = {
   getOrCreateCollection(args: {
     name: string;
     embeddingFunction: null;
@@ -46,12 +45,12 @@ type ChromaClientLike = {
 type LocalDocsSearchOptions = {
   localDocsPath: string | null;
   ollamaHost?: string;
-  chromaClient?: ChromaClientLike;
+  vectorClient?: VectorClientLike;
 };
 
 export class LocalDocsUnavailableError extends Error {
   constructor() {
-    super("Local docs unavailable. Is ChromaDB running?");
+    super("Local docs unavailable. Embedded vector index could not be opened.");
   }
 }
 
@@ -70,12 +69,12 @@ export class LocalDocsEmptyError extends Error {
 export class LocalDocsSearch {
   private readonly localDocsPath: string | null;
   private readonly ollamaHost: string;
-  private readonly chromaClient: ChromaClientLike;
+  private readonly vectorClient: VectorClientLike;
 
   constructor(options: LocalDocsSearchOptions) {
     this.localDocsPath = options.localDocsPath ? resolve(options.localDocsPath) : null;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
-    this.chromaClient = options.chromaClient ?? createChromaClient();
+    this.vectorClient = options.vectorClient ?? createVectorClient();
   }
 
   async search(query: string, topK: number): Promise<DocResult[]> {
@@ -92,7 +91,7 @@ export class LocalDocsSearch {
 
   private async getCollection(): Promise<CollectionLike> {
     try {
-      return await this.chromaClient.getOrCreateCollection({
+      return await this.vectorClient.getOrCreateCollection({
         name: COLLECTION_NAME,
         embeddingFunction: null
       });
@@ -229,7 +228,7 @@ function isConnectionError(error: unknown): boolean {
     message.includes("econnrefused") ||
     message.includes("connection refused") ||
     message.includes("failed to connect") ||
-    error.name === "ChromaConnectionError"
+    message.includes("sqlite")
   );
 }
 

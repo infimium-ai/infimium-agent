@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
-import { ChromaClient } from "chromadb";
 import { glob } from "glob";
 import Parser, { type Language, type SyntaxNode } from "tree-sitter";
 import JavaScript from "tree-sitter-javascript";
@@ -11,9 +10,9 @@ import TypeScriptGrammars from "tree-sitter-typescript";
 import DartParser, { type SyntaxNode as DartSyntaxNode } from "@sengac/tree-sitter";
 import Dart from "@sengac/tree-sitter-dart";
 
-import { createChromaClient } from "../chroma.js";
 import { dataPath } from "../paths.js";
-import { CodeParser } from "./code-parser.js";
+import { createVectorClient } from "../vector-store.js";
+import { CodeParser, type CodeSymbol } from "./code-parser.js";
 import {
   createProjectFilePolicy,
   filterProjectFiles
@@ -28,8 +27,12 @@ const JS_EXTENSIONS = new Set([".js", ".jsx", ".mjs"]);
 const TS_EXTENSIONS = new Set([".ts", ".tsx"]);
 const PY_EXTENSIONS = new Set([".py"]);
 const DART_EXTENSIONS = new Set([".dart"]);
-const RESOLVE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py", ".dart"];
-const INDEX_FILES = ["index.ts", "index.tsx", "index.js", "index.jsx", "__init__.py", "index.dart"];
+const RESOLVE_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".py", ".dart", ".go", ".rs", ".java"];
+const INDEX_FILES = ["index.ts", "index.tsx", "index.js", "index.jsx", "__init__.py", "index.dart", "main.go", "lib.rs"];
+const CALL_KEYWORDS = new Set([
+  "if", "for", "while", "switch", "catch", "function", "return", "typeof", "sizeof",
+  "new", "super", "this", "class", "def", "fn", "match", "assert"
+]);
 
 type CodeLanguage = "javascript" | "typescript" | "python" | "dart";
 
@@ -40,25 +43,40 @@ type CodeMetadata = {
 };
 
 type CollectionGetResult = {
-  metadatas?: Array<CodeMetadata | null>;
+  metadatas?: Array<Record<string, unknown> | null>;
 };
 
 type CollectionLike = {
   get(args: { include: Array<"metadatas"> }): Promise<CollectionGetResult>;
 };
 
-type ChromaClientLike = {
+type VectorClientLike = {
   getOrCreateCollection(args: {
     name: string;
     embeddingFunction: null;
   }): Promise<CollectionLike>;
 };
 
+type SymbolCallRecord = {
+  caller: string;
+  callee: string;
+  lineStart: number;
+};
+
+type HttpRouteRecord = {
+  method: string;
+  path: string;
+  handlerSymbol: string;
+  filePath: string;
+  lineStart: number;
+  framework: string;
+};
+
 export class DepGraphBuilder {
   private db: import("node:sqlite").DatabaseSync | null = null;
 
   constructor(
-    private readonly chromaClient: ChromaClientLike = createChromaClient(),
+    private readonly vectorClient: VectorClientLike = createVectorClient(),
     private readonly sqlitePath: string = DEP_GRAPH_DB_PATH,
     private readonly codeParser: CodeParser = new CodeParser()
   ) {}
@@ -72,8 +90,17 @@ export class DepGraphBuilder {
     this.clearGraphForRoot(rootPath);
 
     for (const sourceFile of files) {
-      for (const symbol of this.codeParser.parseFile(sourceFile)) {
+      const symbols = await this.codeParser.parseFileAsync(sourceFile);
+      for (const symbol of symbols) {
         this.insertSymbolLocation(symbol.name, symbol.filePath, symbol.lineStart);
+      }
+
+      const source = readFileSync(sourceFile, "utf8");
+      for (const edge of extractSymbolCalls(symbols)) {
+        this.insertSymbolCall(edge.caller, sourceFile, edge.callee, edge.lineStart);
+      }
+      for (const route of extractHttpRoutes(source, sourceFile, symbols)) {
+        this.insertHttpRoute(route);
       }
 
       const imports = extractImports(sourceFile)
@@ -126,6 +153,15 @@ export class DepGraphBuilder {
         deleteSymbol.run(row.symbol_name, row.file_path);
       }
     }
+
+    this.deleteRowsForRoot("symbol_calls", "caller_file", rootPath);
+    this.deleteRowsForRoot("http_routes", "file_path", rootPath);
+  }
+
+  private deleteRowsForRoot(tableName: "symbol_calls" | "http_routes", column: string, rootPath: string): void {
+    this.getDb()
+      .prepare(`DELETE FROM ${tableName} WHERE ${column} = ? OR ${column} LIKE ?`)
+      .run(rootPath, `${rootPath}/%`);
   }
 
   private insertFileImport(sourceFile: string, importedFile: string): void {
@@ -152,8 +188,40 @@ export class DepGraphBuilder {
       .run(symbolName, filePath, lineStart);
   }
 
+  private insertSymbolCall(
+    callerSymbol: string,
+    callerFile: string,
+    calleeSymbol: string,
+    lineStart: number
+  ): void {
+    this.getDb()
+      .prepare(
+        `INSERT OR IGNORE INTO symbol_calls
+          (caller_symbol, caller_file, callee_symbol, line_start)
+         VALUES (?, ?, ?, ?)`
+      )
+      .run(callerSymbol, callerFile, calleeSymbol, lineStart);
+  }
+
+  private insertHttpRoute(route: HttpRouteRecord): void {
+    this.getDb()
+      .prepare(
+        `INSERT OR REPLACE INTO http_routes
+          (method, route_path, handler_symbol, file_path, line_start, framework)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        route.method,
+        route.path,
+        route.handlerSymbol,
+        route.filePath,
+        route.lineStart,
+        route.framework
+      );
+  }
+
   private async populateSymbolLocations(rootPath: string): Promise<void> {
-    const collection = await this.chromaClient.getOrCreateCollection({
+    const collection = await this.vectorClient.getOrCreateCollection({
       name: CODE_COLLECTION_NAME,
       embeddingFunction: null
     });
@@ -193,6 +261,30 @@ export class DepGraphBuilder {
           line_start INTEGER,
           PRIMARY KEY (symbol_name, file_path)
         );
+
+        CREATE TABLE IF NOT EXISTS symbol_calls (
+          caller_symbol TEXT NOT NULL,
+          caller_file TEXT NOT NULL,
+          callee_symbol TEXT NOT NULL,
+          line_start INTEGER NOT NULL,
+          PRIMARY KEY (caller_symbol, caller_file, callee_symbol, line_start)
+        );
+
+        CREATE INDEX IF NOT EXISTS symbol_calls_callee_idx
+          ON symbol_calls(callee_symbol);
+
+        CREATE TABLE IF NOT EXISTS http_routes (
+          method TEXT NOT NULL,
+          route_path TEXT NOT NULL,
+          handler_symbol TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          line_start INTEGER NOT NULL,
+          framework TEXT NOT NULL,
+          PRIMARY KEY (method, route_path, file_path, line_start)
+        );
+
+        CREATE INDEX IF NOT EXISTS http_routes_handler_idx
+          ON http_routes(handler_symbol);
       `);
     }
 
@@ -204,9 +296,192 @@ export class DepGraphBuilder {
   }
 }
 
+function extractSymbolCalls(symbols: CodeSymbol[]): SymbolCallRecord[] {
+  const edges: SymbolCallRecord[] = [];
+  const callPattern = /\b([A-Za-z_$][\w$]*)\s*\(/g;
+
+  for (const symbol of symbols) {
+    if (symbol.type === "class") {
+      continue;
+    }
+    const bodyStart = findImplementationStart(symbol.bodyText, symbol.language);
+    const implementation = symbol.bodyText.slice(bodyStart);
+    for (const match of implementation.matchAll(callPattern)) {
+      const callee = match[1];
+      if (!callee || CALL_KEYWORDS.has(callee)) {
+        continue;
+      }
+      const absoluteOffset = bodyStart + (match.index ?? 0);
+      edges.push({
+        caller: symbol.name,
+        callee,
+        lineStart: symbol.lineStart + countNewlines(symbol.bodyText.slice(0, absoluteOffset))
+      });
+    }
+  }
+
+  return uniqueCalls(edges);
+}
+
+function findImplementationStart(bodyText: string, language: CodeSymbol["language"]): number {
+  if (language === "python") {
+    const newline = bodyText.indexOf("\n");
+    return newline === -1 ? bodyText.length : newline + 1;
+  }
+  const arrow = bodyText.indexOf("=>");
+  const brace = bodyText.indexOf("{");
+  const candidates = [arrow === -1 ? null : arrow + 2, brace === -1 ? null : brace + 1]
+    .filter((value): value is number => value !== null);
+  return candidates.length > 0 ? Math.min(...candidates) : 0;
+}
+
+function uniqueCalls(edges: SymbolCallRecord[]): SymbolCallRecord[] {
+  const seen = new Set<string>();
+  return edges.filter((edge) => {
+    const key = `${edge.caller}:${edge.callee}:${edge.lineStart}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function extractHttpRoutes(
+  source: string,
+  filePath: string,
+  symbols: CodeSymbol[]
+): HttpRouteRecord[] {
+  const routes: HttpRouteRecord[] = [];
+  collectCallStyleRoutes(source, filePath, symbols, routes);
+  collectDecoratorRoutes(source, filePath, symbols, routes);
+  collectJavaRoutes(source, filePath, symbols, routes);
+  collectGoRoutes(source, filePath, symbols, routes);
+  collectRustRoutes(source, filePath, symbols, routes);
+  return routes;
+}
+
+function collectCallStyleRoutes(
+  source: string,
+  filePath: string,
+  symbols: CodeSymbol[],
+  routes: HttpRouteRecord[]
+): void {
+  const pattern = /\b(app|router|server|fastify)\.(get|post|put|patch|delete|options|head)\s*\(\s*["'`]([^"'`]+)["'`]\s*,\s*(?:async\s*)?([A-Za-z_$][\w$]*)?/gi;
+  for (const match of source.matchAll(pattern)) {
+    const lineStart = lineAtOffset(source, match.index ?? 0);
+    routes.push({
+      method: (match[2] ?? "ANY").toUpperCase(),
+      path: match[3] ?? "/",
+      handlerSymbol: match[4] ?? symbolAtLine(symbols, lineStart)?.name ?? "anonymous",
+      filePath,
+      lineStart,
+      framework: match[1]?.toLowerCase() ?? "router"
+    });
+  }
+}
+
+function collectDecoratorRoutes(
+  source: string,
+  filePath: string,
+  symbols: CodeSymbol[],
+  routes: HttpRouteRecord[]
+): void {
+  const pattern = /@(app|router|blueprint)\.(get|post|put|patch|delete|options|head)\s*\(\s*["']([^"']+)["']/gi;
+  for (const match of source.matchAll(pattern)) {
+    const lineStart = lineAtOffset(source, match.index ?? 0);
+    routes.push({
+      method: (match[2] ?? "ANY").toUpperCase(),
+      path: match[3] ?? "/",
+      handlerSymbol: nextSymbol(symbols, lineStart)?.name ?? "anonymous",
+      filePath,
+      lineStart,
+      framework: match[1]?.toLowerCase() ?? "python-router"
+    });
+  }
+}
+
+function collectJavaRoutes(
+  source: string,
+  filePath: string,
+  symbols: CodeSymbol[],
+  routes: HttpRouteRecord[]
+): void {
+  const pattern = /@(Get|Post|Put|Patch|Delete|Request)Mapping\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']/g;
+  for (const match of source.matchAll(pattern)) {
+    const lineStart = lineAtOffset(source, match.index ?? 0);
+    routes.push({
+      method: match[1] === "Request" ? "ANY" : (match[1] ?? "ANY").toUpperCase(),
+      path: match[2] ?? "/",
+      handlerSymbol: nextSymbol(symbols, lineStart)?.name ?? "anonymous",
+      filePath,
+      lineStart,
+      framework: "spring"
+    });
+  }
+}
+
+function collectGoRoutes(
+  source: string,
+  filePath: string,
+  symbols: CodeSymbol[],
+  routes: HttpRouteRecord[]
+): void {
+  const pattern = /\b(?:http\.)?HandleFunc\s*\(\s*["']([^"']+)["']\s*,\s*([A-Za-z_][\w]*)/g;
+  for (const match of source.matchAll(pattern)) {
+    const lineStart = lineAtOffset(source, match.index ?? 0);
+    routes.push({
+      method: "ANY",
+      path: match[1] ?? "/",
+      handlerSymbol: match[2] ?? "anonymous",
+      filePath,
+      lineStart,
+      framework: "net/http"
+    });
+  }
+}
+
+function collectRustRoutes(
+  source: string,
+  filePath: string,
+  symbols: CodeSymbol[],
+  routes: HttpRouteRecord[]
+): void {
+  const pattern = /#\[(get|post|put|patch|delete)\s*\(\s*["']([^"']+)["']\s*\)\]/gi;
+  for (const match of source.matchAll(pattern)) {
+    const lineStart = lineAtOffset(source, match.index ?? 0);
+    routes.push({
+      method: (match[1] ?? "ANY").toUpperCase(),
+      path: match[2] ?? "/",
+      handlerSymbol: nextSymbol(symbols, lineStart)?.name ?? "anonymous",
+      filePath,
+      lineStart,
+      framework: "rust-web"
+    });
+  }
+}
+
+function symbolAtLine(symbols: CodeSymbol[], line: number): CodeSymbol | null {
+  return symbols
+    .filter((symbol) => symbol.lineStart <= line && symbol.lineEnd >= line)
+    .sort((left, right) => (left.lineEnd - left.lineStart) - (right.lineEnd - right.lineStart))[0] ?? null;
+}
+
+function nextSymbol(symbols: CodeSymbol[], line: number): CodeSymbol | null {
+  return symbols
+    .filter((symbol) => symbol.lineStart >= line)
+    .sort((left, right) => left.lineStart - right.lineStart)[0] ?? null;
+}
+
+function lineAtOffset(source: string, offset: number): number {
+  return 1 + countNewlines(source.slice(0, offset));
+}
+
+function countNewlines(value: string): number {
+  return (value.match(/\n/g) ?? []).length;
+}
+
 async function findCodeFiles(rootPath: string): Promise<string[]> {
   const policy = await createProjectFilePolicy(rootPath);
-  const matches = await glob("**/*.{ts,tsx,js,jsx,py,dart}", {
+  const matches = await glob("**/*.{ts,tsx,js,jsx,py,dart,go,rs,java}", {
     cwd: rootPath,
     absolute: true,
     nodir: true,
