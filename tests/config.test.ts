@@ -25,6 +25,7 @@ describe("zero-config setup", () => {
     await expect(access(envPath)).resolves.toBeUndefined();
     const content = await readFile(envPath, "utf8");
     expect(content).toContain("OLLAMA_HOST=http://localhost:11434");
+    expect(content).toContain("INFIMIUM_MEMORY_MODEL=llama3.1");
     expect(content).toContain("INFIMIUM_AUTO_INDEX=true");
     expect(content).toContain("INFIMIUM_TELEMETRY=true");
     expect(content).not.toContain("CHROMADB_HOST");

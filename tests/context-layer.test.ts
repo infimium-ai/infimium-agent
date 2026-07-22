@@ -50,11 +50,16 @@ describe("context layer", () => {
       const parsed = parseYaml(written) as typeof snapshot;
       const cached = memoryStore.getLatestContextSnapshot(projectPath);
 
-      expect(parsed.currentTask).toBe("Build durable context layer");
-      expect(parsed.recentMemory[0]?.summary).toBe("Added get_context");
-      expect(parsed.contextFilePath).toBe(contextFilePath);
-      expect(parsed.project.name).toBe("repo");
+      expect(parsed.activeExecution.currentTask).toBe("Build durable context layer");
+      expect(parsed.activeExecution.activeScratchpad[0]?.summary).toBe("Added get_context");
+      expect(parsed.dynamicState.contextFilePath).toBe(contextFilePath);
+      expect(parsed.staticAnchors.project.name).toBe("repo");
+      expect(parsed.staticAnchors.codebase.shape).toContain("repo is a generic codebase");
+      expect(parsed.staticAnchors.project.entryPoints).toContain("index.ts");
+      expect(parsed.staticAnchors.retrieval.strategy).toBe("AST-first");
+      expect(parsed.activeExecution.agentHandoff.preferredTools).toContain("expand_symbol");
       expect(cached?.snapshotText).toContain("Build durable context layer");
+      expect(cached?.snapshotText).toContain("staticAnchors:");
       expect(cached?.format).toBe("yaml");
     } finally {
       memoryStore.close();
@@ -83,7 +88,32 @@ describe("context layer", () => {
       });
 
       expect(context).toContain("Cached context note");
+      expect(context).toContain("schemaVersion: 4");
+    } finally {
+      memoryStore.close();
+    }
+  });
+
+  it("keeps cached schema v3 snapshots readable during migration", async () => {
+    const memoryStore = new ProjectMemoryStore(dbPath);
+    try {
+      memoryStore.saveContextSnapshot({
+        projectPath,
+        filePath: contextFilePath,
+        snapshotText: "schemaVersion: 3\nproject:\n  name: legacy\n",
+        format: "yaml",
+        updatedAt: 1_000
+      });
+
+      const context = await readContextLayer({
+        projectPath,
+        filePath: contextFilePath,
+        refresh: false,
+        memoryStore
+      });
+
       expect(context).toContain("schemaVersion: 3");
+      expect(context).toContain("name: legacy");
     } finally {
       memoryStore.close();
     }
@@ -99,10 +129,10 @@ describe("context layer", () => {
         memoryStore
       });
       expect(JSON.parse(context)).toMatchObject({
-        schemaVersion: 3,
-        project: { path: projectPath }
+        schemaVersion: 4,
+        staticAnchors: { project: { path: projectPath } }
       });
-      expect(await readFile(contextFilePath, "utf8")).toContain("schemaVersion: 3");
+      expect(await readFile(contextFilePath, "utf8")).toContain("schemaVersion: 4");
     } finally {
       memoryStore.close();
     }
@@ -131,9 +161,9 @@ describe("context layer", () => {
       });
       const snapshot = await writer.refresh();
 
-      expect(snapshot.recentMemory[0]?.summary).toBe("User-visible progress");
-      expect(snapshot.recentMemory[1]?.summary).toBe("Indexed project");
-      expect(snapshot.lastNote).toBe("User-visible progress");
+      expect(snapshot.activeExecution.activeScratchpad[0]?.summary).toBe("User-visible progress");
+      expect(snapshot.activeExecution.activeScratchpad).toHaveLength(1);
+      expect(snapshot.activeExecution.lastNote).toBe("User-visible progress");
     } finally {
       memoryStore.close();
     }
@@ -178,10 +208,10 @@ describe("context layer", () => {
       });
       const snapshot = await writer.refresh();
 
-      expect(snapshot.workingTree.totalChangedFiles).toBe(16);
-      expect(snapshot.workingTree.changedFiles).toHaveLength(10);
-      expect(snapshot.workingTree.omittedFiles).toBe(6);
-      expect(snapshot.workingTree.summary).toContain("16 changed files");
+      expect(snapshot.dynamicState.workingTree.totalChangedFiles).toBe(16);
+      expect(snapshot.dynamicState.workingTree.changedFiles).toHaveLength(10);
+      expect(snapshot.dynamicState.workingTree.omittedFiles).toBe(6);
+      expect(snapshot.dynamicState.workingTree.summary).toContain("16 changed files");
     } finally {
       memoryStore.close();
     }
@@ -223,7 +253,7 @@ describe("context layer", () => {
       });
       const snapshot = await writer.refresh();
 
-      expect(snapshot.workspace).toMatchObject({
+      expect(snapshot.staticAnchors.workspace).toMatchObject({
         name: "Example product",
         currentProjectId: "frontend",
         totalProjects: 2,
@@ -235,13 +265,13 @@ describe("context layer", () => {
           }
         ]
       });
-      expect(snapshot.workspace?.projects.map((project) => project.id)).toEqual([
+      expect(snapshot.staticAnchors.workspace?.projects.map((project) => project.id)).toEqual([
         "frontend",
         "backend"
       ]);
-      expect(snapshot.recentMemory.map((event) => event.summary)).toEqual(["Frontend task"]);
-      expect(JSON.stringify(snapshot.workspace)).not.toContain("Private backend task");
-      expect(snapshot.workingTree.changedFiles.every((file) => !file.path.includes("backend"))).toBe(true);
+      expect(snapshot.activeExecution.activeScratchpad.map((event) => event.summary)).toEqual(["Frontend task"]);
+      expect(JSON.stringify(snapshot.staticAnchors.workspace)).not.toContain("Private backend task");
+      expect(snapshot.dynamicState.workingTree.changedFiles.every((file) => !file.path.includes("backend"))).toBe(true);
     } finally {
       memoryStore.close();
     }

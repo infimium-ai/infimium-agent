@@ -3,6 +3,7 @@ import {
   Activity,
   ArrowRight,
   Binary,
+  Brain,
   Braces,
   ChevronLeft,
   ChevronRight,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 
-type ViewId = "pulse" | "graph" | "index" | "economics";
+type ViewId = "pulse" | "memory" | "graph" | "index" | "economics";
 type ThemeMode = "dark" | "light";
 type RetrievalStrategy = "Full Implementation Text" | "Semantic Chunks" | "Infimium AST Skeletons";
 
@@ -56,6 +57,19 @@ type Pulse = {
     depGraphRelationships: number;
     lastIndexedAt: string | null;
   } | null;
+};
+
+type MemoryState = {
+  projectPath: string;
+  activeSession: {
+    id: string;
+    task: string | null;
+    startedAt: string | null;
+    eventCount: number;
+  } | null;
+  scratchpad: Array<{ type: string; summary: string; createdAt: string | null }>;
+  recentMilestones: Array<{ milestone: string; summary: string; completedAt: string | null }>;
+  ledger: Array<{ category: string; key: string; value: string; updatedAt: string | null }>;
 };
 
 type Graph = {
@@ -172,6 +186,7 @@ type PlaygroundScope = {
 
 const navigation: NavigationItem[] = [
   { id: "pulse", label: "The Pulse", icon: Activity },
+  { id: "memory", label: "Project Memory", icon: Brain },
   { id: "graph", label: "Knowledge Graph", icon: Network },
   { id: "index", label: "Index & Logs", icon: Braces },
   { id: "economics", label: "Token Economics", icon: Binary }
@@ -179,6 +194,7 @@ const navigation: NavigationItem[] = [
 
 const viewCopy: Record<ViewId, { eyebrow: string; title: string }> = {
   pulse: { eyebrow: "Runtime / Live", title: "The Pulse" },
+  memory: { eyebrow: "Continuity / Project", title: "Project Memory" },
   graph: { eyebrow: "Topology / Workspace", title: "Knowledge Graph" },
   index: { eyebrow: "Retrieval / Activity", title: "Index Explorer & Logs" },
   economics: { eyebrow: "Efficiency / Context", title: "Token Economics" }
@@ -356,6 +372,7 @@ export function App() {
 
         <section className="content-grid" aria-live="polite">
           {activeView === "pulse" ? <PulseView projectPath={projectPath} /> : null}
+          {activeView === "memory" ? <MemoryView projectPath={projectPath} /> : null}
           {activeView === "graph" ? <GraphView projectPath={projectPath} theme={theme} /> : null}
           {activeView === "index" && scope.data && selectedWorkspace ? (
             <IndexView
@@ -367,6 +384,77 @@ export function App() {
         </section>
       </main>
     </div>
+  );
+}
+
+function MemoryView({ projectPath }: { projectPath: string }) {
+  const memory = useApi<MemoryState>(withProject("/api/memory", projectPath));
+  if (memory.loading) return <LoadingPanel label="Reading compact project memory" />;
+  if (memory.error || !memory.data) return <ErrorPanel message={memory.error} />;
+  const data = memory.data;
+
+  return (
+    <>
+      <article className="panel panel-wide task-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="panel-label">ACTIVE SCRATCHPAD</p>
+            <h2>{data.activeSession?.task ?? "No active memory session"}</h2>
+            <p className="path-note">
+              {data.activeSession
+                ? `${data.activeSession.eventCount} recent event${data.activeSession.eventCount === 1 ? "" : "s"}`
+                : "Use project_memory action=remember to begin."}
+            </p>
+          </div>
+          <Brain size={20} />
+        </div>
+      </article>
+
+      <article className="panel memory-tier-panel">
+        <p className="panel-label">SEMANTIC LEDGER</p>
+        <p className="tier-note">Durable decisions, rules, quirks, and blockers</p>
+        {data.ledger.length > 0 ? (
+          <div className="memory-list">
+            {data.ledger.map((entry) => (
+              <div className="memory-entry" key={`${entry.category}:${entry.key}`}>
+                <span className="memory-tag">{entry.category}</span>
+                <strong>{entry.key}</strong>
+                <p>{entry.value}</p>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyLine text="No durable memories recorded" />}
+      </article>
+
+      <article className="panel memory-tier-panel">
+        <p className="panel-label">EPISODIC ARCHIVE</p>
+        <p className="tier-note">The latest three compacted milestones</p>
+        {data.recentMilestones.length > 0 ? (
+          <div className="memory-list">
+            {data.recentMilestones.map((entry) => (
+              <div className="memory-entry" key={`${entry.completedAt}:${entry.milestone}`}>
+                <strong>{entry.milestone}</strong>
+                <p>{entry.summary}</p>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyLine text="Complete a memory session to create the first milestone" />}
+      </article>
+
+      <article className="panel panel-wide memory-tier-panel">
+        <p className="panel-label">CURRENT SESSION EVENTS</p>
+        {data.scratchpad.length > 0 ? (
+          <div className="memory-list compact-memory-list">
+            {data.scratchpad.map((entry, index) => (
+              <div className="memory-entry" key={`${entry.createdAt}:${index}`}>
+                <span className="memory-tag">{entry.type}</span>
+                <p>{entry.summary}</p>
+              </div>
+            ))}
+          </div>
+        ) : <EmptyLine text="Scratchpad is clear" />}
+      </article>
+    </>
   );
 }
 

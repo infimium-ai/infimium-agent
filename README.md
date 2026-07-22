@@ -55,8 +55,12 @@ Open **Token Economics** to see the estimated token difference across your actua
 Requires Node.js 22.5+. From your project folder:
 
 ```bash
+cd /path/to/your/project
 npx infimium@latest setup
 ```
+
+Run setup from the repository you want to index, not from your home directory (`~`).
+Infimium stops broad roots automatically so it cannot scan unrelated files.
 
 That creates global config, starts Ollama if it is installed, pulls `nomic-embed-text`, indexes the current project or workspace, runs `doctor`, and opens Playground.
 
@@ -113,12 +117,12 @@ Infimium normally uses the MCP process working directory. If your client starts 
 | Tool | What it does |
 | --- | --- |
 | `hello_infimium` | Confirms the MCP server is healthy. |
-| `get_context` | Loads compact YAML project context, Git state, task, and memory. |
+| `get_context` | Loads tri-zonal YAML context: stable repo anchors, live Git/index state, and active execution. |
 | `semantic_code_search` | Finds code by meaning and returns symbol signatures first. |
 | `expand_symbol` | Loads one full implementation only when needed. |
 | `query_local_docs` | Searches local Markdown, text, HTML, and PDF files. |
 | `dep_graph` | Shows imports, callers, callees, and HTTP routes for a symbol. |
-| `project_memory` | Saves progress, decisions, tasks, and blockers across agents. |
+| `project_memory` | Keeps active scratchpad events, compact milestones, and durable project rules across agents. |
 | `plan` | Builds a grounded implementation plan from code and graph context. |
 | `web_search` | Searches the web through optional Tinyfish configuration. |
 | `fetch_url` | Extracts readable Markdown or text from a URL. |
@@ -140,9 +144,34 @@ infimium dep-graph authenticateUser
 infimium plan --dry-run "add rate limiting"
 infimium remember "Rate limiter tests pass" --type progress --task "Rate limiting"
 infimium resume
+infimium memory complete
+infimium memory search "rate limiting decision"
 ```
 
 Use `npx infimium ...` if you did not install the package globally.
+
+## Project Memory
+
+Infimium keeps memory bounded across long sessions:
+
+- **Scratchpad:** recent events for the active task.
+- **Archive:** compact summaries of completed tasks.
+- **Ledger:** durable decisions, rules, quirks, and unresolved blockers.
+
+Record meaningful progress while working:
+
+```bash
+infimium remember "Added rate-limit middleware" --type progress --task "Rate limiting"
+infimium remember "Use Redis-backed counters in production" --type decision
+```
+
+When the task is complete:
+
+```bash
+infimium memory complete
+```
+
+Infimium uses the local `llama3.1` model when available and falls back to deterministic compaction when it is not. Raw compacted events remain stored locally for seven days before pruning. `get_context` never calls an LLM or network service.
 
 From a source checkout, build once and run the local playground with:
 
@@ -160,6 +189,8 @@ npm run playground
 - Go, Rust, and Java Tree-sitter WASM grammars download on first use and cache in `~/.infimium/grammars/`.
 - `.gitignore`, `.infimiumignore`, and framework defaults exclude dependencies, build output, Flutter artifacts, caches, and binaries before indexing.
 - `semantic_code_search` returns signatures; `expand_symbol` provides full code on demand.
+- Project memory uses session-scoped scratchpads, compact milestone archives, and a versioned semantic ledger.
+- `get_context` emits static anchors, dynamic repository state, and active execution as separate YAML zones.
 
 ## Multiple Projects
 
@@ -177,7 +208,7 @@ For unattended setup:
 infimium index --yes --no-playground
 ```
 
-Use `--no-workspace` to index only the current project. Workspace projects keep separate memory and Git state while `get_context` includes compact summaries and graph relationships from related projects.
+Use `--no-workspace` to index only the current project. Workspace projects keep separate memory and Git state while `get_context` includes balanced summaries and graph relationships from related projects.
 
 ## Privacy
 

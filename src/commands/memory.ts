@@ -5,8 +5,10 @@ import {
 import {
   ProjectMemoryStore,
   formatResumeContext,
+  type MemoryLedgerCategory,
   type ProjectMemoryEventType
 } from "../memory/project-memory.js";
+import { compactProjectMemory } from "../memory/memory-compactor.js";
 import { resolveProjectPath } from "../paths.js";
 
 type MemoryCommand = "resume" | "remember" | "memory";
@@ -77,7 +79,53 @@ export async function runMemoryCommand(
     return;
   }
 
-  throw new Error("Usage: infimium memory resume | infimium memory remember \"what changed\"");
+  if (subcommand === "start") {
+    const task = subArgs.join(" ").trim();
+    if (!task) throw new Error("Usage: infimium memory start \"task description\"");
+    const store = new ProjectMemoryStore();
+    try {
+      const session = store.startSession(resolveMemoryProjectPath(), task);
+      console.log(`Started memory session ${session.id}: ${session.task ?? task}`);
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (subcommand === "complete") {
+    const result = await compactProjectMemory({
+      projectPath: resolveMemoryProjectPath(),
+      useModel: !subArgs.includes("--no-model")
+    });
+    console.log(formatCompactionResult(result));
+    return;
+  }
+
+  if (subcommand === "search") {
+    const query = subArgs.join(" ").trim();
+    if (!query) throw new Error("Usage: infimium memory search \"query\"");
+    const store = new ProjectMemoryStore();
+    try {
+      console.log(formatMemorySearch(store.searchMemory(resolveMemoryProjectPath(), query)));
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  if (subcommand === "ledger") {
+    const store = new ProjectMemoryStore();
+    try {
+      console.log(formatLedger(store.getRelevantLedger(resolveMemoryProjectPath(), "", 50)));
+    } finally {
+      store.close();
+    }
+    return;
+  }
+
+  throw new Error(
+    "Usage: infimium memory start|remember|resume|complete|search|ledger"
+  );
 }
 
 export async function runGetContextCommand(args: string[] = process.argv.slice(3)): Promise<void> {
@@ -112,14 +160,19 @@ export async function runGetContextTool(args: {
   });
 }
 
-export function runProjectMemoryTool(args: {
-  action: "resume" | "remember";
+export async function runProjectMemoryTool(args: {
+  action: "resume" | "remember" | "complete" | "search" | "ledger" | "supersede";
   note?: string;
   task?: string;
   event_type?: ProjectMemoryEventType;
   limit?: number;
   project_path?: string;
-}): string {
+  query?: string;
+  key?: string;
+  value?: string;
+  category?: MemoryLedgerCategory;
+  use_model?: boolean;
+}): Promise<string> {
   const store = new ProjectMemoryStore();
   try {
     const projectPath = resolveMemoryProjectPath(args.project_path);
@@ -140,6 +193,33 @@ export function runProjectMemoryTool(args: {
       return `Remembered ${event.eventType}: ${event.summary}`;
     }
 
+    if (args.action === "complete") {
+      const result = await compactProjectMemory({
+        projectPath,
+        useModel: args.use_model ?? true,
+        store
+      });
+      return formatCompactionResult(result);
+    }
+
+    if (args.action === "search") {
+      const query = args.query?.trim();
+      if (!query) return "Memory search unavailable: query is required";
+      return formatMemorySearch(store.searchMemory(projectPath, query, args.limit ?? 10));
+    }
+
+    if (args.action === "ledger") {
+      return formatLedger(store.getRelevantLedger(projectPath, args.query ?? "", args.limit ?? 10));
+    }
+
+    if (args.action === "supersede") {
+      const key = args.key?.trim();
+      const value = args.value?.trim();
+      if (!key || !value) return "Ledger update unavailable: key and value are required";
+      const entry = store.supersedeLedgerEntry(projectPath, key, value, args.category ?? "rule");
+      return `Updated ${entry.category}/${entry.key}: ${entry.value}`;
+    }
+
     return formatResumeContext(
       store.getResumeContext(projectPath, args.limit ?? 8)
     );
@@ -148,16 +228,52 @@ export function runProjectMemoryTool(args: {
   }
 }
 
+function formatCompactionResult(result: Awaited<ReturnType<typeof compactProjectMemory>>): string {
+  return [
+    "Memory session completed",
+    `Milestone: ${result.archive.milestone}`,
+    `Summary: ${result.archive.summary}`,
+    `Compacted: ${result.scratchpadEvents} scratchpad event(s)`,
+    `Ledger: ${result.ledgerEntries} durable memory entr${result.ledgerEntries === 1 ? "y" : "ies"}`,
+    `Compactor: ${result.usedModel ? `Ollama (${result.model})` : "deterministic fallback"}`,
+    result.archive.unresolvedBlockers.length > 0
+      ? `Open blockers: ${result.archive.unresolvedBlockers.join("; ")}`
+      : "Open blockers: none"
+  ].join("\n");
+}
+
+function formatMemorySearch(results: ReturnType<ProjectMemoryStore["searchMemory"]>): string {
+  if (results.length === 0) return "No matching project memory found.";
+  return results.map((result, index) =>
+    `[${index + 1}] ${result.source}/${result.category}: ${result.title}\n${result.summary}`
+  ).join("\n\n");
+}
+
+function formatLedger(entries: ReturnType<ProjectMemoryStore["getRelevantLedger"]>): string {
+  if (entries.length === 0) return "No durable project memories recorded.";
+  return entries.map((entry) => `- ${entry.category}/${entry.key}: ${entry.value}`).join("\n");
+}
+
 export function resolveMemoryProjectPath(explicitProjectPath?: string | null): string {
   if (explicitProjectPath?.trim()) {
     return resolveProjectPath(explicitProjectPath);
   }
 
-  const store = new ProjectMemoryStore();
+  let store: ProjectMemoryStore | null = null;
   try {
+    store = new ProjectMemoryStore();
     return store.getActiveProjectPath() ?? resolveProjectPath();
+  } catch {
+    store?.close();
+    store = null;
+    try {
+      store = new ProjectMemoryStore(undefined, { readOnly: true });
+      return store.getActiveProjectPath() ?? resolveProjectPath();
+    } catch {
+      return resolveProjectPath();
+    }
   } finally {
-    store.close();
+    store?.close();
   }
 }
 

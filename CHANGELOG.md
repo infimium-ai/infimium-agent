@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.1
+
+- Stopped setup from accidentally indexing an entire home directory when run outside a project.
+- Added a clear repository-scoped setup command when the selected root is too broad.
+
+## 0.5.0
+
+- Added three-tier project memory: active scratchpad, episodic archive, and semantic ledger.
+- Added explicit memory-session completion with local Ollama compaction and deterministic fallback.
+- Added memory search, durable ledger updates, supersession history, and seven-day raw-event retention.
+- Migrated legacy `project_changes` into session memory without deleting existing data.
+- Added tri-zonal context schema v4 with static anchors, dynamic state, and active execution.
+- Added task-aware handoffs, bounded memory retrieval, and fresh/stale/missing index health.
+- Added a read-only Project Memory view to Infimium Playground.
+- Fixed source discovery when a project is opened through a symlink.
+
 ## 0.4.4
 
 - Deduplicated concurrent `first_tool_call` telemetry events per install.

@@ -103,9 +103,10 @@ export function createProjectId(projectPath: string): string {
 async function findSourceFiles(rootPath: string): Promise<string[]> {
   const policy = await createProjectFilePolicy(rootPath);
   const matches = await glob(SOURCE_GLOB, {
-    cwd: rootPath,
+    cwd: policy.rootPath,
     absolute: true,
     nodir: true,
+    follow: true,
     ignore: policy.globIgnorePatterns
   });
   return filterProjectFiles(matches, policy);
