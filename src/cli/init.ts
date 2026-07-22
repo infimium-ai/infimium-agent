@@ -11,6 +11,7 @@ SEARCH_PROVIDER=tinyfish
 LOCAL_DOCS_PATH=
 CODEBASE_PATH=
 OLLAMA_HOST=http://localhost:11434
+INFIMIUM_MEMORY_MODEL=llama3.1
 SHELL_ALLOWLIST=ls,git,pwd,npm,npx
 INFIMIUM_AUTO_INDEX=true
 INFIMIUM_TELEMETRY=${telemetryEnabled ? "true" : "false"}

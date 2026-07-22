@@ -485,9 +485,10 @@ function countNewlines(value: string): number {
 async function findCodeFiles(rootPath: string): Promise<string[]> {
   const policy = await createProjectFilePolicy(rootPath);
   const matches = await glob("**/*.{ts,tsx,js,jsx,py,dart,go,rs,java}", {
-    cwd: rootPath,
+    cwd: policy.rootPath,
     absolute: true,
     nodir: true,
+    follow: true,
     ignore: [
       ...policy.globIgnorePatterns,
       "**/*.test.ts",

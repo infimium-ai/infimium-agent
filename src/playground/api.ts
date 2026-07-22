@@ -54,6 +54,32 @@ export type PlaygroundPulse = {
   } | null;
 };
 
+export type PlaygroundMemory = {
+  projectPath: string;
+  activeSession: {
+    id: string;
+    task: string | null;
+    startedAt: string | null;
+    eventCount: number;
+  } | null;
+  scratchpad: Array<{
+    type: string;
+    summary: string;
+    createdAt: string | null;
+  }>;
+  recentMilestones: Array<{
+    milestone: string;
+    summary: string;
+    completedAt: string | null;
+  }>;
+  ledger: Array<{
+    category: string;
+    key: string;
+    value: string;
+    updatedAt: string | null;
+  }>;
+};
+
 export type PlaygroundGraph = {
   name: string;
   nodes: Array<{
@@ -192,6 +218,10 @@ export function createPlaygroundRouter(projectPath: string = process.cwd()): Rou
     response.json(readPlaygroundPulse(readRequestedProjectPath(request, rootPath)));
   });
 
+  router.get("/memory", (request: Request, response: Response) => {
+    response.json(readPlaygroundMemory(readRequestedProjectPath(request, rootPath)));
+  });
+
   router.get("/workspace", (request: Request, response: Response) => {
     response.json(readPlaygroundWorkspace(readRequestedProjectPath(request, rootPath)));
   });
@@ -261,16 +291,18 @@ export function readPlaygroundPulse(
 ): PlaygroundPulse {
   const paths = resolvePlaygroundPaths(projectPath);
   const snapshot = readContextSnapshot(paths);
-  const workingTree = readRecord(snapshot?.workingTree);
+  const dynamicState = readRecord(snapshot?.dynamicState);
+  const activeExecution = readRecord(snapshot?.activeExecution);
+  const workingTree = readRecord(dynamicState?.workingTree) ?? readRecord(snapshot?.workingTree);
   const changedFiles = readChangedFiles(workingTree?.changedFiles);
   const totalChangedFiles = readNumber(workingTree?.totalChangedFiles) ?? changedFiles.length;
-  const index = readLiveIndex(paths, readIndex(snapshot?.index));
+  const index = readLiveIndex(paths, readIndex(dynamicState?.indexHealth ?? snapshot?.index));
 
   return {
     projectPath: paths.projectPath,
     contextPath: paths.contextPath,
-    currentTask: readString(snapshot?.currentTask),
-    recentMemory: readMemory(snapshot?.recentMemory),
+    currentTask: readString(activeExecution?.currentTask) ?? readString(snapshot?.currentTask),
+    recentMemory: readMemory(activeExecution?.activeScratchpad ?? snapshot?.recentMemory),
     workingTree: {
       dirty: readBoolean(workingTree?.dirty) ?? totalChangedFiles > 0,
       totalChangedFiles,
@@ -283,6 +315,84 @@ export function readPlaygroundPulse(
     },
     index
   };
+}
+
+export function readPlaygroundMemory(
+  projectPath: string = process.cwd()
+): PlaygroundMemory {
+  const paths = resolvePlaygroundPaths(projectPath);
+  const empty: PlaygroundMemory = {
+    projectPath: paths.projectPath,
+    activeSession: null,
+    scratchpad: [],
+    recentMilestones: [],
+    ledger: []
+  };
+  if (!paths.graphDbPath || !canOpenReadOnly(paths.graphDbPath)) return empty;
+
+  return withReadOnlyDatabase(paths.graphDbPath, (db) => {
+    if (!tableExists(db, "memory_sessions")) return empty;
+    const session = db.prepare(
+      `SELECT id, task, started_at FROM memory_sessions
+       WHERE project_path = ? AND status = 'active'
+       ORDER BY started_at DESC LIMIT 1`
+    ).get(paths.projectPath) as JsonRecord | undefined;
+    const sessionId = readString(session?.id);
+    const scratchRows = sessionId && tableExists(db, "memory_scratchpad")
+      ? db.prepare(
+          `SELECT event_type, summary, created_at FROM memory_scratchpad
+           WHERE session_id = ? AND compacted_at IS NULL
+           ORDER BY created_at DESC, id DESC LIMIT 5`
+        ).all(sessionId) as JsonRecord[]
+      : [];
+    const scratchCountRow = sessionId && tableExists(db, "memory_scratchpad")
+      ? db.prepare(
+          `SELECT COUNT(*) AS count FROM memory_scratchpad
+           WHERE session_id = ? AND compacted_at IS NULL`
+        ).get(sessionId) as JsonRecord | undefined
+      : undefined;
+    const archiveRows = tableExists(db, "memory_archive")
+      ? db.prepare(
+          `SELECT milestone, summary, completed_at FROM memory_archive
+           WHERE project_path = ? ORDER BY completed_at DESC, id DESC LIMIT 3`
+        ).all(paths.projectPath) as JsonRecord[]
+      : [];
+    const ledgerRows = tableExists(db, "memory_ledger")
+      ? db.prepare(
+          `SELECT category, memory_key, value, updated_at FROM memory_ledger
+           WHERE project_path = ? AND status = 'active'
+           ORDER BY updated_at DESC, id DESC LIMIT 8`
+        ).all(paths.projectPath) as JsonRecord[]
+      : [];
+
+    return {
+      projectPath: paths.projectPath,
+      activeSession: sessionId
+        ? {
+            id: sessionId,
+            task: readString(session?.task),
+            startedAt: toIso(readNumber(session?.started_at)),
+            eventCount: readNumber(scratchCountRow?.count) ?? 0
+          }
+        : null,
+      scratchpad: scratchRows.map((row) => ({
+        type: readString(row.event_type) ?? "note",
+        summary: readString(row.summary) ?? "(no summary)",
+        createdAt: toIso(readNumber(row.created_at))
+      })),
+      recentMilestones: archiveRows.map((row) => ({
+        milestone: readString(row.milestone) ?? "Completed task",
+        summary: readString(row.summary) ?? "",
+        completedAt: toIso(readNumber(row.completed_at))
+      })),
+      ledger: ledgerRows.map((row) => ({
+        category: readString(row.category) ?? "rule",
+        key: readString(row.memory_key) ?? "memory",
+        value: readString(row.value) ?? "",
+        updatedAt: toIso(readNumber(row.updated_at))
+      }))
+    };
+  });
 }
 
 export function readPlaygroundWorkspace(
@@ -1337,6 +1447,10 @@ function readNumber(value: unknown): number | null {
     : typeof value === "bigint"
       ? Number(value)
       : null;
+}
+
+function toIso(value: number | null): string | null {
+  return value === null || value <= 0 ? null : new Date(value).toISOString();
 }
 
 function readBoolean(value: unknown): boolean | null {

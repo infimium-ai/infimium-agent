@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, relative, resolve, sep } from "node:path";
 
@@ -77,6 +77,7 @@ export async function createProjectFilePolicy(
   projectPath: string
 ): Promise<ProjectFilePolicy> {
   const rootPath = resolve(projectPath);
+  const canonicalRootPath = canonicalProjectPath(rootPath);
   const kind: ProjectKind = existsSync(resolve(rootPath, "pubspec.yaml"))
     ? "flutter"
     : "generic";
@@ -92,7 +93,10 @@ export async function createProjectFilePolicy(
     globIgnorePatterns,
     isIgnored(filePath: string): boolean {
       const absolutePath = resolve(filePath);
-      const relativePath = normalizePath(relative(rootPath, absolutePath));
+      const requestedRelativePath = normalizePath(relative(rootPath, absolutePath));
+      const relativePath = isWithinRoot(requestedRelativePath)
+        ? requestedRelativePath
+        : normalizePath(relative(canonicalRootPath, canonicalProjectPath(absolutePath)));
       if (!relativePath || relativePath.startsWith("../")) {
         return relativePath.startsWith("../");
       }
@@ -104,6 +108,19 @@ export async function createProjectFilePolicy(
       );
     }
   };
+}
+
+function isWithinRoot(relativePath: string): boolean {
+  return relativePath === "" || (relativePath !== ".." && !relativePath.startsWith("../"));
+}
+
+function canonicalProjectPath(projectPath: string): string {
+  const resolvedPath = resolve(projectPath);
+  try {
+    return realpathSync.native(resolvedPath);
+  } catch {
+    return resolvedPath;
+  }
 }
 
 export function filterProjectFiles(

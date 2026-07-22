@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -52,5 +52,16 @@ describe("project overview", () => {
     expect(overview.entryPoints).toContain("lib/main.dart");
     expect(overview.modules).toContain("lib/services");
     expect(overview.projectId).toHaveLength(12);
+  });
+
+  it("detects languages when the project is opened through a symlink", async () => {
+    const linkedPath = join(projectPath, "..", `linked-${Date.now()}`);
+    await symlink(projectPath, linkedPath, "dir");
+    try {
+      const overview = await readProjectOverview(linkedPath);
+      expect(overview.languages).toEqual([{ name: "Dart", files: 1 }]);
+    } finally {
+      await rm(linkedPath, { force: true });
+    }
   });
 });

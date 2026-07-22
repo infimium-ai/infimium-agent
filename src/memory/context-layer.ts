@@ -30,16 +30,24 @@ import {
 
 const DEFAULT_CONTEXT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_CONTEXT_LIMIT = 8;
-const DEFAULT_RECENT_FILE_LIMIT = 10;
+const DEFAULT_RECENT_FILE_LIMIT = 5;
 const DEFAULT_CHANGED_FILE_LIMIT = 10;
 
 export type ContextOutputFormat = "yaml" | "json";
 
-export type ContextLayerSnapshot = {
-  schemaVersion: 3;
-  generatedAt: string;
-  project: ProjectOverview;
-  workspace: {
+type IndexSummary = {
+  docsFiles: number;
+  docsChunks: number;
+  codeSymbols: number;
+  codeFiles: number;
+  depGraphRelationships: number;
+  watchedProjects: number;
+  lastIndexedAt: string | null;
+};
+
+type StaticProjectOverview = Omit<ProjectOverview, "generatedAt">;
+
+type WorkspaceSummary = {
     workspaceId: string;
     name: string;
     manifestPath: string;
@@ -54,30 +62,11 @@ export type ContextLayerSnapshot = {
       current: boolean;
       dependsOn: string[];
       summary: string;
-      index: ContextLayerSnapshot["index"];
     }>;
     relationships: WorkspaceGraphRelationship[];
-  } | null;
-  contextFilePath: string;
-  currentTask: string | null;
-  lastNote: string | null;
-  lastPlanPath: string | null;
-  index: {
-    docsFiles: number;
-    docsChunks: number;
-    codeSymbols: number;
-    codeFiles: number;
-    depGraphRelationships: number;
-    watchedProjects: number;
-    lastIndexedAt: string | null;
-  } | null;
-  recentMemory: Array<{
-    type: ProjectMemoryEvent["eventType"];
-    summary: string;
-    details: string | null;
-    createdAt: string | null;
-  }>;
-  workingTree: {
+  };
+
+type WorkingTreeSummary = {
     isGitRepo: boolean;
     dirty: boolean;
     totalChangedFiles: number;
@@ -88,7 +77,8 @@ export type ContextLayerSnapshot = {
       status: string;
     }>;
   };
-  recentActivity: {
+
+type RecentActivitySummary = {
     withinWindow: boolean;
     totalFiles: number;
     omittedFiles: number;
@@ -98,9 +88,54 @@ export type ContextLayerSnapshot = {
       modifiedAt: string;
     }>;
   };
-  agentHandoff: {
-    instruction: string;
-    preferredTools: string[];
+
+export type ContextLayerSnapshot = {
+  schemaVersion: 4;
+  staticAnchors: {
+    project: StaticProjectOverview;
+    codebase: {
+      shape: string;
+      importantAreas: string[];
+      usefulCommands: string[];
+    };
+    workspace: WorkspaceSummary | null;
+    retrieval: {
+      strategy: "AST-first";
+      searchTool: "semantic_code_search";
+      expansionTool: "expand_symbol";
+      guidance: string;
+    };
+  };
+  dynamicState: {
+    generatedAt: string;
+    contextFilePath: string;
+    workingTree: WorkingTreeSummary;
+    recentActivity: RecentActivitySummary;
+    indexHealth: (IndexSummary & { status: "fresh" | "stale" | "missing" }) | null;
+  };
+  activeExecution: {
+    currentTask: string | null;
+    lastNote: string | null;
+    lastPlanPath: string | null;
+    semanticLedger: Array<{
+      category: string;
+      key: string;
+      value: string;
+    }>;
+    recentMilestones: Array<{
+      milestone: string;
+      summary: string;
+      completedAt: string;
+    }>;
+    activeScratchpad: Array<{
+      type: ProjectMemoryEvent["eventType"];
+      summary: string;
+      createdAt: string;
+    }>;
+    agentHandoff: {
+      instruction: string;
+      preferredTools: string[];
+    };
   };
 };
 
@@ -162,9 +197,12 @@ export class ContextLayerWriter {
       activateProject: this.activateProject
     });
     this.memoryStore.saveProjectOverview({
-      projectId: snapshot.project.projectId,
+      projectId: snapshot.staticAnchors.project.projectId,
       projectPath: this.projectPath,
-      overviewJson: JSON.stringify(snapshot.project),
+      overviewJson: JSON.stringify({
+        ...snapshot.staticAnchors.project,
+        generatedAt: snapshot.dynamicState.generatedAt
+      }),
       updatedAt: Date.now()
     });
 
@@ -202,9 +240,6 @@ export class ContextLayerWriter {
       this.projectPath,
       Math.min(50, Math.max(this.limit * 5, this.limit))
     );
-    const recentMemory = compactMemoryEvents(resumeContext.recentEvents);
-    const lastNonIndexNote =
-      recentMemory.find((event) => event.eventType !== "index")?.summary ?? null;
     const [project, workspace, index, workingTree, recentActivity] = await Promise.all([
       readProjectOverview(this.projectPath),
       readWorkspaceSummary(this.projectPath, this.memoryStore),
@@ -213,35 +248,122 @@ export class ContextLayerWriter {
       readRecentlyTouchedFiles(this.projectPath, now - this.activityWindowMs, this.recentFileLimit)
     ]);
 
+    const indexHealth = buildIndexHealth(index, recentActivity);
+    const { generatedAt: _overviewGeneratedAt, ...staticProject } = project;
     return {
-      schemaVersion: 3,
-      generatedAt: new Date(now).toISOString(),
-      project,
-      workspace,
-      contextFilePath: this.filePath,
-      currentTask: resumeContext.state.currentTask,
-      lastNote: lastNonIndexNote ?? resumeContext.state.lastNote,
-      lastPlanPath: resumeContext.state.lastPlanPath,
-      index,
-      recentMemory: recentMemory
-        .slice(0, this.limit)
-        .map(formatMemoryEvent),
-      workingTree,
-      recentActivity,
-      agentHandoff: {
-        instruction:
-          "Read this context first, then use semantic_code_search, dep_graph, query_local_docs, and project_memory before editing.",
-        preferredTools: [
-          "get_context",
-          "project_memory",
-          "semantic_code_search",
-          "dep_graph",
-          "query_local_docs",
-          "plan"
-        ]
+      schemaVersion: 4,
+      staticAnchors: {
+        project: staticProject,
+        codebase: buildCodebaseContext(project, workspace),
+        workspace,
+        retrieval: {
+          strategy: "AST-first",
+          searchTool: "semantic_code_search",
+          expansionTool: "expand_symbol",
+          guidance:
+            "Start from compact symbol skeletons. Expand only the exact implementation needed for the task."
+        }
+      },
+      dynamicState: {
+        generatedAt: new Date(now).toISOString(),
+        contextFilePath: this.filePath,
+        workingTree,
+        recentActivity,
+        indexHealth
+      },
+      activeExecution: {
+        currentTask: resumeContext.state.currentTask,
+        lastNote: resumeContext.state.lastNote,
+        lastPlanPath: resumeContext.state.lastPlanPath,
+        semanticLedger: resumeContext.semanticLedger.map((entry) => ({
+          category: entry.category,
+          key: entry.key,
+          value: entry.value
+        })),
+        recentMilestones: resumeContext.recentArchives.map((entry) => ({
+          milestone: entry.milestone,
+          summary: entry.summary,
+          completedAt: new Date(entry.completedAt).toISOString()
+        })),
+        activeScratchpad: resumeContext.activeScratchpad.slice(-5).map((event) => ({
+          type: event.eventType,
+          summary: event.summary,
+          createdAt: new Date(event.createdAt).toISOString()
+        })),
+        agentHandoff: buildAgentHandoff(
+          resumeContext.state.currentTask,
+          recentActivity,
+          indexHealth?.status ?? "missing"
+        )
       }
     };
   }
+}
+
+function buildCodebaseContext(
+  project: ProjectOverview,
+  workspace: WorkspaceSummary | null
+): ContextLayerSnapshot["staticAnchors"]["codebase"] {
+  const stack = project.frameworks.length > 0
+    ? project.frameworks
+    : project.languages.map((language) => language.name);
+  const workspaceText = workspace
+    ? ` It is part of workspace "${workspace.name}" with ${workspace.totalProjects} project(s).`
+    : "";
+
+  return {
+    shape:
+      `${project.name} is a ${project.kind} codebase` +
+      (stack.length > 0 ? ` using ${stack.join(", ")}` : "") +
+      `.${workspaceText}`,
+    importantAreas: project.modules.slice(0, 10),
+    usefulCommands: project.commands.slice(0, 8)
+  };
+}
+
+function buildIndexHealth(
+  index: IndexSummary | null,
+  recentActivity: RecentActivitySummary
+): ContextLayerSnapshot["dynamicState"]["indexHealth"] {
+  if (!index) return null;
+  if (index.codeFiles === 0 && index.docsFiles === 0) {
+    return { ...index, status: "missing" };
+  }
+  const indexedAt = index.lastIndexedAt ? Date.parse(index.lastIndexedAt) : 0;
+  const changedAfterIndex = recentActivity.files.some(
+    (file) => Date.parse(file.modifiedAt) > indexedAt
+  );
+  return {
+    ...index,
+    status: !indexedAt || changedAfterIndex ? "stale" : "fresh"
+  };
+}
+
+function buildAgentHandoff(
+  currentTask: string | null,
+  recentActivity: RecentActivitySummary,
+  indexStatus: "fresh" | "stale" | "missing"
+): ContextLayerSnapshot["activeExecution"]["agentHandoff"] {
+  const activeFiles = recentActivity.files.slice(0, 3).map((file) => file.path);
+  const task = currentTask ? `Continue the active task: ${currentTask}.` : "Confirm the next task before editing.";
+  const files = activeFiles.length > 0
+    ? ` Inspect ${activeFiles.join(", ")} first because they changed most recently.`
+    : "";
+  const index = indexStatus === "fresh"
+    ? " Use semantic_code_search before expanding implementation details."
+    : " Run infimium index before relying on semantic retrieval.";
+  return {
+    instruction: `${task}${files}${index}`,
+    preferredTools: [
+      "get_context",
+      "project_memory",
+      "semantic_code_search",
+      "dep_graph",
+      "query_local_docs",
+      "expand_symbol",
+      "plan"
+    ]
+  };
 }
 
 export function startContextLayerAutoWriter(
@@ -291,23 +413,7 @@ export async function readContextLayer(options: ContextLayerOptions & {
   }
 }
 
-function formatMemoryEvent(event: ProjectMemoryEvent): ContextLayerSnapshot["recentMemory"][number] {
-  return {
-    type: event.eventType,
-    summary: event.summary,
-    details: event.details,
-    createdAt: event.createdAt ? new Date(event.createdAt).toISOString() : null
-  };
-}
-
-function compactMemoryEvents(events: ProjectMemoryEvent[]): ProjectMemoryEvent[] {
-  const latestIndexEvent = events.find((event) => event.eventType === "index");
-  const nonIndexEvents = events.filter((event) => event.eventType !== "index");
-
-  return latestIndexEvent ? [...nonIndexEvents, latestIndexEvent] : nonIndexEvents;
-}
-
-async function readIndexSummary(projectPath: string): Promise<ContextLayerSnapshot["index"]> {
+async function readIndexSummary(projectPath: string): Promise<IndexSummary | null> {
   const status = await readInfimiumStatus({ projectPath }).catch(() => null);
   if (!status) {
     return null;
@@ -329,7 +435,7 @@ async function readIndexSummary(projectPath: string): Promise<ContextLayerSnapsh
 async function readWorkspaceSummary(
   projectPath: string,
   memoryStore: ProjectMemoryStore
-): Promise<ContextLayerSnapshot["workspace"]> {
+): Promise<WorkspaceSummary | null> {
   const workspace = loadWorkspaceForProject(projectPath);
   if (!workspace) {
     return null;
@@ -376,8 +482,7 @@ async function readWorkspaceSummary(
         role: workspaceProject.role,
         current: workspaceProject.id === currentProject.id,
         dependsOn: workspaceProject.dependsOn,
-        summary: overview.summary,
-        index: await readIndexSummary(workspaceProject.path)
+        summary: overview.summary
       };
     })
   );
@@ -419,7 +524,7 @@ async function readStoredOrFreshOverview(
 
 async function readGitWorkingTree(
   projectPath: string
-): Promise<ContextLayerSnapshot["workingTree"]> {
+): Promise<WorkingTreeSummary> {
   const result = spawnSync("git", ["status", "--short", "--untracked-files=all"], {
     cwd: projectPath,
     encoding: "utf8",
@@ -465,12 +570,13 @@ async function readRecentlyTouchedFiles(
   projectPath: string,
   sinceMs: number,
   limit: number
-): Promise<ContextLayerSnapshot["recentActivity"]> {
+): Promise<RecentActivitySummary> {
   const policy = await createProjectFilePolicy(projectPath);
   const paths = await glob("**/*", {
-    cwd: projectPath,
+    cwd: policy.rootPath,
     absolute: true,
     nodir: true,
+    follow: true,
     ignore: policy.globIgnorePatterns
   }).catch(() => []);
 
@@ -482,7 +588,7 @@ async function readRecentlyTouchedFiles(
       }
 
       return {
-        path: displayPath(filePath, projectPath),
+        path: displayPath(filePath, policy.rootPath),
         modifiedAt: new Date(fileStat.mtimeMs).toISOString(),
         modifiedMs: fileStat.mtimeMs
       };
@@ -521,7 +627,7 @@ function displayPath(filePath: string, projectPath: string): string {
 }
 
 function serializeSnapshot(
-  snapshot: ContextLayerSnapshot,
+  snapshot: unknown,
   format: ContextOutputFormat
 ): string {
   if (format === "json") {
@@ -533,24 +639,24 @@ function serializeSnapshot(
   });
 }
 
-function parseCachedSnapshot(value: string): ContextLayerSnapshot | null {
+function parseCachedSnapshot(value: string): unknown | null {
   try {
     const parsed = parseYaml(value) as unknown;
-    return isContextLayerSnapshot(parsed) ? parsed : null;
+    return isRecognizedContextSnapshot(parsed) ? parsed : null;
   } catch {
     return null;
   }
 }
 
-function isContextLayerSnapshot(value: unknown): value is ContextLayerSnapshot {
+function isRecognizedContextSnapshot(value: unknown): boolean {
   return (
     typeof value === "object" &&
     value !== null &&
     "schemaVersion" in value &&
-    value.schemaVersion === 3 &&
-    "project" in value
+    (value.schemaVersion === 3 || value.schemaVersion === 4)
   );
 }
+
 
 function isProjectOverview(value: unknown, projectPath: string): value is ProjectOverview {
   return (

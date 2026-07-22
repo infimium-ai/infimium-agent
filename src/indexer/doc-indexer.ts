@@ -151,9 +151,10 @@ export class DocIndexer {
   private async findDocumentFiles(rootPath: string): Promise<string[]> {
     const policy = await createProjectFilePolicy(rootPath);
     const matches = await glob("**/*.{md,txt,pdf,html}", {
-      cwd: rootPath,
+      cwd: policy.rootPath,
       absolute: true,
       nodir: true,
+      follow: true,
       ignore: policy.globIgnorePatterns
     });
 

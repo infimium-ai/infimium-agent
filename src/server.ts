@@ -97,12 +97,17 @@ type PlanArguments = {
 };
 
 type ProjectMemoryArguments = {
-  action: "resume" | "remember";
+  action: "resume" | "remember" | "complete" | "search" | "ledger" | "supersede";
   note?: string;
   task?: string;
   event_type?: "note" | "progress" | "decision" | "blocker" | "index" | "plan";
   limit?: number;
   project_path?: string;
+  query?: string;
+  key?: string;
+  value?: string;
+  category?: "decision" | "rule" | "quirk" | "blocker";
+  use_model?: boolean;
 };
 
 type GetContextArguments = {
@@ -286,9 +291,9 @@ const toolDefinitions = [
   {
     name: "project_memory",
     description:
-      "Remember or resume project task context across chats, agents, and IDEs. Pass project_path once when the IDE workspace differs from the MCP server cwd.",
+      "Manage compact project memory across chats, agents, and IDEs: remember active work, complete and archive sessions, search history, or update durable rules.",
     schema: z.object({
-      action: z.enum(["resume", "remember"]).default("resume"),
+      action: z.enum(["resume", "remember", "complete", "search", "ledger", "supersede"]).default("resume"),
       note: z.string().optional(),
       task: z.string().optional(),
       event_type: z
@@ -296,14 +301,19 @@ const toolDefinitions = [
         .default("note")
         .optional(),
       limit: z.number().int().positive().default(8).optional(),
-      project_path: z.string().optional()
+      project_path: z.string().optional(),
+      query: z.string().optional(),
+      key: z.string().optional(),
+      value: z.string().optional(),
+      category: z.enum(["decision", "rule", "quirk", "blocker"]).optional(),
+      use_model: z.boolean().default(true).optional()
     }),
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["resume", "remember"],
+          enum: ["resume", "remember", "complete", "search", "ledger", "supersede"],
           default: "resume"
         },
         note: { type: "string" },
@@ -314,7 +324,15 @@ const toolDefinitions = [
           default: "note"
         },
         limit: { type: "number", default: 8 },
-        project_path: { type: "string" }
+        project_path: { type: "string" },
+        query: { type: "string" },
+        key: { type: "string" },
+        value: { type: "string" },
+        category: {
+          type: "string",
+          enum: ["decision", "rule", "quirk", "blocker"]
+        },
+        use_model: { type: "boolean", default: true }
       },
       additionalProperties: false
     }
@@ -322,7 +340,7 @@ const toolDefinitions = [
   {
     name: "get_context",
     description:
-      "Read the compact YAML context layer and project overview. Pass project_path once to activate the current IDE workspace as the default.",
+      "Read the balanced YAML context layer with repo overview, Git state, task, memory, and AST-first handoff guidance. Pass project_path once to activate the current IDE workspace as the default.",
     schema: z.object({
       refresh: z.boolean().default(true).optional(),
       limit: z.number().int().positive().default(8).optional(),
@@ -506,9 +524,9 @@ async function handlePlan(args: PlanArguments): Promise<ToolResponse> {
   return textResponse(text);
 }
 
-function handleProjectMemory(args: ProjectMemoryArguments): ToolResponse {
+async function handleProjectMemory(args: ProjectMemoryArguments): Promise<ToolResponse> {
   indexProjectInBackground(args.project_path);
-  return textResponse(runProjectMemoryTool(args));
+  return textResponse(await runProjectMemoryTool(args));
 }
 
 async function handleGetContext(args: GetContextArguments): Promise<ToolResponse> {
@@ -539,7 +557,7 @@ export function createServer(): Server {
   const server = new Server(
     {
       name: "infimium",
-      version: "0.4.4"
+      version: "0.5.0"
     },
     {
       capabilities: {
@@ -603,7 +621,7 @@ export function createServer(): Server {
     }
 
     if (tool.name === "project_memory") {
-      return handleProjectMemory(parsedArgs as ProjectMemoryArguments);
+      return await handleProjectMemory(parsedArgs as ProjectMemoryArguments);
     }
 
     if (tool.name === "get_context") {

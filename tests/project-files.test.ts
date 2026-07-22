@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,5 +38,18 @@ describe("project file policy", () => {
     expect(policy.isIgnored(join(projectPath, "cache", "state.txt"))).toBe(true);
     expect(policy.isIgnored(join(projectPath, "generated", "client.ts"))).toBe(true);
     expect(policy.isIgnored(join(projectPath, "src", "client.ts"))).toBe(false);
+  });
+
+  it("accepts canonical file paths when the project root is a symlink", async () => {
+    const targetPath = join(projectPath, "target");
+    const linkedPath = join(projectPath, "linked-project");
+    const sourcePath = join(targetPath, "src", "index.ts");
+    await mkdir(join(targetPath, "src"), { recursive: true });
+    await writeFile(sourcePath, "export const ready = true;\n", "utf8");
+    await symlink(targetPath, linkedPath, "dir");
+
+    const policy = await createProjectFilePolicy(linkedPath);
+
+    expect(policy.isIgnored(sourcePath)).toBe(false);
   });
 });

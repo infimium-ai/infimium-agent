@@ -9,6 +9,7 @@ import {
   readPlaygroundHealth,
   readPlaygroundIndexFiles,
   readPlaygroundLogs,
+  readPlaygroundMemory,
   readPlaygroundMetrics,
   readPlaygroundPulse,
   readPlaygroundScope,
@@ -73,6 +74,90 @@ workingTree:
     expect(pulse.index?.codeSymbols).toBe(12);
     expect(pulse.recentMemory[0]?.summary).toBe("API routes are wired");
     expect(pulse.workingTree.changedFiles).toEqual([{ status: "M", path: "src/index.ts" }]);
+  });
+
+  it("reads tri-zonal context v4 snapshots", async () => {
+    const projectPath = await createProject();
+    await mkdir(join(projectPath, "context"), { recursive: true });
+    await writeFile(
+      join(projectPath, "context", "layer.md"),
+      `schemaVersion: 4
+dynamicState:
+  indexHealth:
+    codeSymbols: 20
+    codeFiles: 4
+    docsFiles: 0
+    docsChunks: 0
+    depGraphRelationships: 7
+    lastIndexedAt: 2026-07-20T12:00:00.000Z
+  workingTree:
+    dirty: true
+    totalChangedFiles: 1
+    summary: 1 changed file
+    changedFiles:
+      - status: M
+        path: src/memory.ts
+activeExecution:
+  currentTask: Compact project memory
+  activeScratchpad:
+    - type: progress
+      summary: Added memory sessions
+      createdAt: 2026-07-20T12:01:00.000Z
+`,
+      "utf8"
+    );
+
+    const pulse = readPlaygroundPulse(projectPath);
+    expect(pulse.currentTask).toBe("Compact project memory");
+    expect(pulse.recentMemory[0]?.summary).toBe("Added memory sessions");
+    expect(pulse.index?.codeSymbols).toBe(20);
+    expect(pulse.workingTree.changedFiles[0]?.path).toBe("src/memory.ts");
+  });
+
+  it("reads three-tier memory in read-only observer mode", async () => {
+    const projectPath = await createProject();
+    await mkdir(join(projectPath, ".infimium"), { recursive: true });
+    const db = new Database(join(projectPath, ".infimium", "infimium.db"));
+    db.exec(`
+      CREATE TABLE memory_sessions (
+        id TEXT PRIMARY KEY, project_path TEXT, task TEXT, status TEXT,
+        started_at INTEGER, completed_at INTEGER, compacted_at INTEGER
+      );
+      CREATE TABLE memory_scratchpad (
+        id INTEGER PRIMARY KEY, session_id TEXT, project_path TEXT, event_type TEXT,
+        summary TEXT, details TEXT, created_at INTEGER, compacted_at INTEGER
+      );
+      CREATE TABLE memory_archive (
+        id INTEGER PRIMARY KEY, session_id TEXT, project_path TEXT, milestone TEXT,
+        summary TEXT, files_json TEXT, blockers_json TEXT, completed_at INTEGER
+      );
+      CREATE TABLE memory_ledger (
+        id INTEGER PRIMARY KEY, project_path TEXT, category TEXT, memory_key TEXT,
+        value TEXT, status TEXT, source_session_id TEXT, confidence REAL,
+        created_at INTEGER, updated_at INTEGER, superseded_by INTEGER
+      );
+    `);
+    db.prepare("INSERT INTO memory_sessions VALUES (?, ?, ?, 'active', ?, NULL, NULL)")
+      .run("session-1", projectPath, "Ship memory", 1_000);
+    db.prepare("INSERT INTO memory_scratchpad VALUES (1, ?, ?, 'progress', ?, NULL, ?, NULL)")
+      .run("session-1", projectPath, "Added schema", 1_100);
+    for (let id = 2; id <= 7; id += 1) {
+      db.prepare("INSERT INTO memory_scratchpad VALUES (?, ?, ?, 'progress', ?, NULL, ?, NULL)")
+        .run(id, "session-1", projectPath, `Event ${id}`, 1_100 + id);
+    }
+    db.prepare("INSERT INTO memory_archive VALUES (1, 'old', ?, 'Previous release', ?, '[]', '[]', ?)")
+      .run(projectPath, "Shipped context v4", 900);
+    db.prepare("INSERT INTO memory_ledger VALUES (1, ?, 'rule', 'context-network', ?, 'active', NULL, 1, ?, ?, NULL)")
+      .run(projectPath, "get_context stays network-free", 800, 1_200);
+    db.close();
+
+    const memory = readPlaygroundMemory(projectPath);
+    expect(memory.activeSession?.task).toBe("Ship memory");
+    expect(memory.activeSession?.eventCount).toBe(7);
+    expect(memory.scratchpad).toHaveLength(5);
+    expect(memory.scratchpad[0]?.summary).toBe("Event 7");
+    expect(memory.recentMilestones[0]?.milestone).toBe("Previous release");
+    expect(memory.ledger[0]?.key).toBe("context-network");
   });
 
   it("reads symbols and graph edges from SQLite without writing to it", async () => {
