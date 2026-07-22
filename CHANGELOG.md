@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- Preserved the executable permission on the published CLI entrypoint so MCP clients can launch Infimium directly.
+
 ## 0.5.1
 
 - Stopped setup from accidentally indexing an entire home directory when run outside a project.
