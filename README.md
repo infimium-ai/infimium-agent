@@ -64,6 +64,8 @@ Infimium stops broad roots automatically so it cannot scan unrelated files.
 
 That creates global config, starts Ollama if it is installed, pulls `nomic-embed-text`, indexes the current project or workspace, runs `doctor`, and opens Playground.
 
+The published CLI keeps its executable entrypoint, so MCP clients can launch it directly through the configuration below.
+
 If Ollama is not installed yet:
 
 ```bash

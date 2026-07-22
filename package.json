@@ -1,6 +1,6 @@
 {
   "name": "infimium",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Private context layer MCP for AI agents.",
   "private": false,
   "mcpName": "io.github.aryankumar06/infimium",
@@ -55,7 +55,7 @@
     "plan": "tsx src/index.ts plan",
     "playground": "tsx src/index.ts playground",
     "test": "vitest run",
-    "build:cli": "tsc",
+    "build:cli": "tsc && node -e \"require('node:fs').chmodSync('dist/src/index.js',0o755)\"",
     "build:playground": "vite build --config playground-ui/vite.config.ts",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && npm run build:cli && npm run build:playground",
     "prepublishOnly": "npm run build"
