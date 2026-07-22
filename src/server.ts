@@ -635,14 +635,23 @@ export function createServer(): Server {
 }
 
 export async function startServer(): Promise<void> {
-  void trackTelemetry("serve_started");
+  void trackTelemetry("serve_started").catch(() => undefined);
   const server = createServer();
   const transport = new StdioServerTransport();
   const config = loadConfig({ requireSearchApiKey: false });
-  const contextLayer = startContextLayerAutoWriter({
-    projectPath: resolveMemoryProjectPath(config.codebasePath),
-    activateProject: false
-  });
+
+  await server.connect(transport);
+
+  let contextLayer: ReturnType<typeof startContextLayerAutoWriter> | null = null;
+  try {
+    contextLayer = startContextLayerAutoWriter({
+      projectPath: resolveMemoryProjectPath(config.codebasePath),
+      activateProject: false
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Context writer disabled: ${message}`);
+  }
   const autoIndex =
     process.env.INFIMIUM_AUTO_INDEX?.trim() === "false"
       ? null
@@ -655,9 +664,7 @@ export async function startServer(): Promise<void> {
         });
 
   process.once("exit", () => {
-    contextLayer.stop();
+    contextLayer?.stop();
     autoIndex?.stop();
   });
-
-  await server.connect(transport);
 }

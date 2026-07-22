@@ -55,8 +55,12 @@ Open **Token Economics** to see the estimated token difference across your actua
 Requires Node.js 22.5+. From your project folder:
 
 ```bash
+cd /path/to/your/project
 npx infimium@latest setup
 ```
+
+Run setup from the repository you want to index, not from your home directory (`~`).
+Infimium stops broad roots automatically so it cannot scan unrelated files.
 
 That creates global config, starts Ollama if it is installed, pulls `nomic-embed-text`, indexes the current project or workspace, runs `doctor`, and opens Playground.
 

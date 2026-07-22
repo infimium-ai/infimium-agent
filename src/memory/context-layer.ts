@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
@@ -405,12 +405,54 @@ export async function readContextLayer(options: ContextLayerOptions & {
   refresh?: boolean;
   format?: ContextOutputFormat;
 } = {}): Promise<string> {
-  const writer = new ContextLayerWriter(options);
+  let writer: ContextLayerWriter | null = null;
   try {
+    writer = new ContextLayerWriter(options);
     return await writer.getContext(options.refresh ?? true, options.format ?? "yaml");
+  } catch (error: unknown) {
+    const cached = await readCachedContextLayer(options);
+    if (cached !== null) {
+      return cached;
+    }
+    throw error;
   } finally {
-    writer.close();
+    writer?.close();
   }
+}
+
+async function readCachedContextLayer(
+  options: ContextLayerOptions & { format?: ContextOutputFormat }
+): Promise<string | null> {
+  const projectPath = resolve(options.projectPath ?? process.cwd());
+  const filePath = resolve(
+    options.filePath ??
+      (process.env.INFIMIUM_CONTEXT_FILE?.trim() || undefined) ??
+      dataPath(`context/${createProjectId(projectPath)}/layer.md`)
+  );
+  const raw = await readFile(filePath, "utf8").catch(() => null);
+  if (raw) {
+    const parsed = parseCachedSnapshot(raw);
+    if (parsed) {
+      return serializeSnapshot(parsed, options.format ?? "yaml");
+    }
+  }
+
+  let store: ProjectMemoryStore | null = null;
+  try {
+    store = new ProjectMemoryStore(undefined, { readOnly: true });
+    const cached = store.getLatestContextSnapshot(projectPath);
+    if (cached) {
+      const parsed = parseCachedSnapshot(cached.snapshotText);
+      if (parsed) {
+        return serializeSnapshot(parsed, options.format ?? "yaml");
+      }
+    }
+  } catch {
+    // Fall through to the project-scoped context file.
+  } finally {
+    store?.close();
+  }
+  return null;
 }
 
 async function readIndexSummary(projectPath: string): Promise<IndexSummary | null> {

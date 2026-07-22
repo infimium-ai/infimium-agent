@@ -165,15 +165,22 @@ export class ProjectMemoryStore {
   private readonly db: Database;
   private readonly dbPath: string;
 
-  constructor(dbPath: string = dataPath("infimium.db")) {
+  constructor(
+    dbPath: string = dataPath("infimium.db"),
+    options: { readOnly?: boolean } = {}
+  ) {
     const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
     const resolvedDbPath = resolve(dbPath);
-    mkdirSync(dirname(resolvedDbPath), { recursive: true });
+    if (!options.readOnly) {
+      mkdirSync(dirname(resolvedDbPath), { recursive: true });
+    }
     this.dbPath = resolvedDbPath;
-    this.db = new DatabaseSync(resolvedDbPath);
-    this.db.exec("PRAGMA journal_mode = WAL;");
+    this.db = new DatabaseSync(resolvedDbPath, { readOnly: options.readOnly ?? false });
     this.db.exec("PRAGMA busy_timeout = 30000;");
-    this.ensureSchema();
+    if (!options.readOnly) {
+      this.db.exec("PRAGMA journal_mode = WAL;");
+      this.ensureSchema();
+    }
   }
 
   remember(input: RememberInput): ProjectMemoryEvent {

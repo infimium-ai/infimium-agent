@@ -259,11 +259,21 @@ export function resolveMemoryProjectPath(explicitProjectPath?: string | null): s
     return resolveProjectPath(explicitProjectPath);
   }
 
-  const store = new ProjectMemoryStore();
+  let store: ProjectMemoryStore | null = null;
   try {
+    store = new ProjectMemoryStore();
     return store.getActiveProjectPath() ?? resolveProjectPath();
+  } catch {
+    store?.close();
+    store = null;
+    try {
+      store = new ProjectMemoryStore(undefined, { readOnly: true });
+      return store.getActiveProjectPath() ?? resolveProjectPath();
+    } catch {
+      return resolveProjectPath();
+    }
   } finally {
-    store.close();
+    store?.close();
   }
 }
 

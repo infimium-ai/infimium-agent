@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Stopped setup from accidentally indexing an entire home directory when run outside a project.
+- Added a clear repository-scoped setup command when the selected root is too broad.
+
 ## 0.5.0
 
 - Added three-tier project memory: active scratchpad, episodic archive, and semantic ledger.

@@ -1,8 +1,11 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { initEnv } from "../cli/init.js";
+import { loadConfig } from "../config.js";
 import { runIndexCommand } from "../cli/index-cmd.js";
 import { runPlaygroundCommand } from "../cli/playground.js";
 import { collectDoctorChecks, formatDoctorReport } from "./doctor.js";
@@ -16,11 +19,16 @@ const MAC_OLLAMA_BINARY = "/Applications/Ollama.app/Contents/Resources/ollama";
 
 export async function runSetupCommand(args: string[] = []): Promise<void> {
   const options = parseSetupArgs(args);
+  validateSetupProjectPath(
+    loadConfig({ requireSearchApiKey: false }).codebasePath ?? process.cwd()
+  );
   await trackTelemetry("setup_started", { install_deps: options.installDeps });
 
   console.log("Infimium setup");
   console.log("1/5 Creating local config...");
   await initEnv(undefined, { telemetryEnabled: options.telemetryEnabled });
+  const config = loadConfig({ requireSearchApiKey: false });
+  validateSetupProjectPath(config.codebasePath ?? process.cwd());
 
   console.log("\n2/5 Preparing Ollama...");
   const ollamaBinary = await ensureOllamaInstalled(options.installDeps);
@@ -53,6 +61,23 @@ export async function runSetupCommand(args: string[] = []): Promise<void> {
 
   console.log("\nInfimium is ready.");
   console.log("Next: connect Cursor, Claude Desktop, Windsurf, or run `infimium serve`.");
+}
+
+export function validateSetupProjectPath(projectPath: string): void {
+  const resolvedPath = resolve(projectPath);
+  const homePath = resolve(homedir());
+  const filesystemRoot = resolve(homePath, "..");
+
+  if (resolvedPath === homePath || resolvedPath === filesystemRoot) {
+    throw new Error(
+      [
+        `Setup stopped: ${resolvedPath} is too broad to index safely.`,
+        "Run setup from the repository you want Infimium to understand:",
+        "  cd /path/to/your/project",
+        "  npx infimium@latest setup"
+      ].join("\n")
+    );
+  }
 }
 
 async function ensureOllamaInstalled(installDeps: boolean): Promise<string> {
