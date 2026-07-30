@@ -153,7 +153,7 @@ export async function runGetContextTool(args: {
   project_path?: string;
 }): Promise<string> {
   return readContextLayer({
-    projectPath: resolveMemoryProjectPath(args.project_path),
+    projectPath: resolveMemoryProjectPath(args.project_path, true),
     limit: args.limit ?? 8,
     refresh: args.refresh ?? true,
     format: args.format ?? "yaml"
@@ -175,7 +175,7 @@ export async function runProjectMemoryTool(args: {
 }): Promise<string> {
   const store = new ProjectMemoryStore();
   try {
-    const projectPath = resolveMemoryProjectPath(args.project_path);
+    const projectPath = resolveMemoryProjectPath(args.project_path, true);
 
     if (args.action === "remember") {
       const note = args.note?.trim();
@@ -254,23 +254,31 @@ function formatLedger(entries: ReturnType<ProjectMemoryStore["getRelevantLedger"
   return entries.map((entry) => `- ${entry.category}/${entry.key}: ${entry.value}`).join("\n");
 }
 
-export function resolveMemoryProjectPath(explicitProjectPath?: string | null): string {
+export function resolveMemoryProjectPath(
+  explicitProjectPath?: string | null,
+  allowGlobalFallback: boolean = false
+): string {
   if (explicitProjectPath?.trim()) {
     return resolveProjectPath(explicitProjectPath);
+  }
+
+  const cwdPath = resolveProjectPath();
+  if (!allowGlobalFallback) {
+    return cwdPath;
   }
 
   let store: ProjectMemoryStore | null = null;
   try {
     store = new ProjectMemoryStore();
-    return store.getActiveProjectPath() ?? resolveProjectPath();
+    return store.getActiveProjectPath() ?? cwdPath;
   } catch {
     store?.close();
     store = null;
     try {
       store = new ProjectMemoryStore(undefined, { readOnly: true });
-      return store.getActiveProjectPath() ?? resolveProjectPath();
+      return store.getActiveProjectPath() ?? cwdPath;
     } catch {
-      return resolveProjectPath();
+      return cwdPath;
     }
   } finally {
     store?.close();
