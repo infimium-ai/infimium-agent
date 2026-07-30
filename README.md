@@ -4,7 +4,10 @@
 
 # Infimium
 
-Private context layer for AI coding agents. Search code and docs, inspect dependencies, preserve project memory, and build grounded plans from one local MCP server.
+The Private Context Layer & Super Brain for Your Codebase.
+Give AI agents persistent memory, deep dependency graphs, and instant code context—100% local, zero token bloat.
+
+
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
 [![MCP Badge](https://lobehub.com/badge/mcp/infimium-ai-infimium-agent?style=plastic)](https://lobehub.com/mcp/infimium-ai-infimium-agent)
