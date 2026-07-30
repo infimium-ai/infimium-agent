@@ -133,23 +133,23 @@ Infimium normally uses the MCP process working directory. If your client starts 
 
 ## CLI
 
-```bash
-infimium doctor
-infimium status
-infimium playground
-infimium index
-infimium watch
-infimium get-context
-infimium code-search "authentication middleware"
-infimium expand-symbol authenticateUser
-infimium docs-search "deployment setup"
-infimium dep-graph authenticateUser
-infimium plan --dry-run "add rate limiting"
-infimium remember "Rate limiter tests pass" --type progress --task "Rate limiting"
-infimium resume
-infimium memory complete
-infimium memory search "rate limiting decision"
-```
+| Command | Description |
+|---------|-------------|
+| `infimium doctor` | Run health checks on your dependencies and setup. |
+| `infimium status` | Show the current status of the index and memory. |
+| `infimium playground` | Launch the local web UI to explore index, graph, and memory. |
+| `infimium index` | Scan and index the current project directory (code, docs, dependencies). |
+| `infimium watch` | Run the indexer in watch mode to continuously index changes. |
+| `infimium get-context` | Output the full flattened context as YAML (`layer.md`). |
+| `infimium code-search <query>` | Semantically search code and return symbol signatures. |
+| `infimium expand-symbol <symbol>` | Fetch the full implementation code for a specific symbol. |
+| `infimium docs-search <query>` | Semantically search local markdown/text documentation. |
+| `infimium dep-graph <symbol>` | Show dependencies, callers, callees, and route graph. |
+| `infimium plan --dry-run "<task>"` | Draft an implementation plan based on a given prompt. |
+| `infimium remember "<note>"` | Add a milestone, progress, or decision to project memory. |
+| `infimium resume` | Show the active task and recent scratchpad memory events. |
+| `infimium memory complete` | Compact the active scratchpad into an archived milestone. |
+| `infimium memory search "<query>"` | Semantically search past project rules and memory ledger. |
 
 Use `npx infimium ...` if you did not install the package globally.
 
@@ -239,6 +239,12 @@ INFIMIUM_TELEMETRY=false
 ```
 
 ## Troubleshooting
+
+### Database is locked
+
+If you see `Failed to start Infimium: Database is locked`, it means another instance of Infimium is actively holding a lock on the SQLite memory database. This usually happens if you try to run `infimium index` manually in one terminal while `infimium playground` or `infimium watch` is still running in another. Simply stop the running process (Ctrl+C) before running manual commands.
+
+### General Setup Issues
 
 Run:
 

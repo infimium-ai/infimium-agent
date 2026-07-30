@@ -29,6 +29,30 @@ async function main(): Promise<void> {
   const command = process.argv[2] ?? "serve";
   const args = process.argv.slice(3);
 
+  if (command === "--help" || command === "-h" || command === "help") {
+    console.log(`Infimium — Project-Aware Context Layer for AI Agents
+
+Usage: infimium <command> [options]
+
+Commands:
+  setup           Interactive setup for Infimium dependencies (Ollama, models, sqlite)
+  doctor          Run health checks on your setup
+  index           Index the current directory (code, docs, dependencies)
+  watch           Run indexer in watch mode
+  status          Show index and memory status
+  playground      Launch the local playground web UI
+  workspace       Manage tracked projects in your workspace
+  get-context     Output the full flattened context (layer.md)
+  remember        Add a milestone or note to project memory
+  memory          Manage project memory (reset, inspect)
+  plan            Draft an implementation plan based on a prompt
+  serve           (Default) Start the MCP server via stdio
+
+Options:
+  --help, -h      Show this help message`);
+    return;
+  }
+
   if (command === "init") {
     await initEnv(undefined, {
       telemetryEnabled: !args.includes("--no-telemetry")
@@ -155,7 +179,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
+  let message = error instanceof Error ? error.message : String(error);
+  if (message.includes("database is locked")) {
+    message = "Database is locked. Is another instance of Infimium (like the playground or watch) already running?";
+  }
   console.error(`Failed to start Infimium: ${message}`);
   process.exitCode = 1;
 });
