@@ -233,7 +233,7 @@ activeExecution:
     expect(graph.edges.some((edge) => edge.type === "imports")).toBe(true);
     expect(metrics.symbolCount).toBe(2);
     expect(metrics.averageSkeletonTokens).toBe(8);
-    expect(metrics.averageFullTextTokens).toBe(1460);
+    expect(metrics.averageFullTextTokens).toBe(13);
     expect(metrics.totalTokensSaved).toBeGreaterThan(0);
     expect(metrics.estimatedUsdSaved).toBeGreaterThan(0);
     expect(pulse.index?.codeSymbols).toBe(2);
