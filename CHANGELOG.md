@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.3
+
+### Bug Fixes
+- Fixed Node/npm version detection on Windows when `npm --version` outputs config warnings before the version.
+- Added WASM fallback for TypeScript and JavaScript parsing when native tree-sitter bindings fail.
+- Fixed index status check on Windows where path separator and case differences caused false "0 files indexed" reports.
+- Fixed `--no-workspace` flag to skip workspace indexing even when an existing manifest is found.
+- Added Windows Ollama binary detection in common install locations.
+
+### UX Enhancements
+- `infimium doctor` now shows a rich index breakdown: code files, symbols, doc files, and doc chunks instead of a simple count.
+- Doctor warns when code files are indexed but 0 symbols were extracted, indicating a parser failure.
+- Added `--verbose` / `-v` flag to `infimium index` for per-file logging (processed, skipped, or failed with reason).
+- Index command now pre-checks Ollama reachability before starting code indexing and shows a clear fix message if Ollama is down.
+- Index summary now shows count of files that failed to produce symbols, with a hint to use `--verbose`.
+
 ## 0.5.2
 
 - Preserved the executable permission on the published CLI entrypoint so MCP clients can launch Infimium directly.

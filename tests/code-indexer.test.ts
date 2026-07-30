@@ -96,7 +96,8 @@ describe("CodeIndexer", () => {
       filesProcessed: 1,
       symbolsIndexed: 3,
       filesSkipped: 0,
-      filesPruned: 0
+      filesPruned: 0,
+      filesFailed: 0
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
     expect(collection.delete).toHaveBeenCalledWith({ where: { filePath } });
@@ -171,7 +172,8 @@ describe("CodeIndexer", () => {
       filesProcessed: 0,
       symbolsIndexed: 0,
       filesSkipped: 1,
-      filesPruned: 0
+      filesPruned: 0,
+      filesFailed: 0
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
     expect(collection.delete).toHaveBeenCalledTimes(1);
@@ -212,7 +214,8 @@ describe("CodeIndexer", () => {
       filesProcessed: 1,
       symbolsIndexed: 1,
       filesSkipped: 0,
-      filesPruned: 0
+      filesPruned: 0,
+      filesFailed: 0
     });
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect(collection.upsert).toHaveBeenCalledTimes(2);
