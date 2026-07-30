@@ -72,31 +72,67 @@ export class CodeParser {
 
       return extractSymbols(tree.rootNode, source, filePath, language);
     } catch (error: unknown) {
+      // Native tree-sitter bindings can fail on Windows or with mismatched Node ABI.
+      // Fall back to WASM-based parsing for TypeScript and JavaScript.
+      if (language === "typescript" || language === "javascript") {
+        return [];
+      }
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`Warning: failed to parse ${filePath}: ${message}`);
+      const ext = extname(filePath).toLowerCase();
+      console.error(`Warning: failed to parse ${filePath} (ext: ${ext}, parser: native tree-sitter): ${message}`);
       return [];
     }
   }
 
   async parseFileAsync(filePath: string): Promise<CodeSymbol[]> {
     const language = detectLanguage(filePath);
-    if (!language || !isDynamicLanguage(language)) {
+    if (!language) {
       return this.parseFile(filePath);
     }
 
-    try {
-      const source = readFileSync(filePath, "utf8");
-      const grammar = await this.dynamicGrammars.load(language);
-      const parser = new WasmParser();
-      parser.setLanguage(grammar);
-      const tree = parser.parse(source);
-      if (!tree || tree.rootNode.hasError) {
+    // Go, Rust, Java: always use WASM parser (no native bindings bundled)
+    if (isWasmOnlyLanguage(language)) {
+      try {
+        const source = readFileSync(filePath, "utf8");
+        const grammar = await this.dynamicGrammars.load(language);
+        const parser = new WasmParser();
+        parser.setLanguage(grammar);
+        const tree = parser.parse(source);
+        if (!tree || tree.rootNode.hasError) {
+          return [];
+        }
+        return extractDynamicSymbols(tree.rootNode, source, filePath, language);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        const ext = extname(filePath).toLowerCase();
+        console.error(`Warning: failed to parse ${filePath} (ext: ${ext}, parser: WASM): ${message}`);
         return [];
       }
-      return extractDynamicSymbols(tree.rootNode, source, filePath, language);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Warning: failed to parse ${filePath}: ${message}`);
+    }
+
+    // TypeScript, JavaScript, Python, Dart: try native parser first.
+    // If native fails for TS/JS, fall back to WASM.
+    try {
+      return this.parseFile(filePath);
+    } catch {
+      if (language === "typescript" || language === "javascript") {
+        try {
+          const source = readFileSync(filePath, "utf8");
+          const grammar = await this.dynamicGrammars.load(language);
+          const parser = new WasmParser();
+          parser.setLanguage(grammar);
+          const tree = parser.parse(source);
+          if (!tree || tree.rootNode.hasError) {
+            return [];
+          }
+          console.error(`Info: native tree-sitter failed for ${filePath}, fell back to WASM parser successfully.`);
+          return extractDynamicSymbols(tree.rootNode, source, filePath, language);
+        } catch (wasmError: unknown) {
+          const message = wasmError instanceof Error ? wasmError.message : String(wasmError);
+          console.error(`Warning: both native and WASM parsers failed for ${filePath}: ${message}`);
+          return [];
+        }
+      }
       return [];
     }
   }
@@ -138,7 +174,7 @@ function loadLanguage(filePath: string, language: CodeLanguage): Language {
     return Python;
   }
 
-  if (language === "dart" || isDynamicLanguage(language)) {
+  if (language === "dart" || isWasmOnlyLanguage(language)) {
     throw new Error(`${language} uses the modern Tree-sitter runtime`);
   }
 
@@ -146,6 +182,10 @@ function loadLanguage(filePath: string, language: CodeLanguage): Language {
 }
 
 function isDynamicLanguage(language: CodeLanguage): language is DynamicGrammarName {
+  return language === "go" || language === "rust" || language === "java" || language === "typescript" || language === "javascript";
+}
+
+function isWasmOnlyLanguage(language: CodeLanguage): language is "go" | "rust" | "java" {
   return language === "go" || language === "rust" || language === "java";
 }
 
@@ -202,6 +242,13 @@ function dynamicSymbolType(
         node.type
       )
     ) return "class";
+  }
+
+  if (language === "typescript" || language === "javascript") {
+    if (node.type === "function_declaration") return "function";
+    if (node.type === "class_declaration") return "class";
+    if (node.type === "method_definition") return "method";
+    if (node.type === "arrow_function") return "arrow_function";
   }
 
   return null;

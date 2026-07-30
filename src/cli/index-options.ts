@@ -2,12 +2,14 @@ export type ParsedIndexArgs = {
   acceptWorkspace: boolean;
   detectWorkspace: boolean;
   openPlayground: boolean;
+  verbose: boolean;
 };
 
 export function parseIndexArgs(args: string[]): ParsedIndexArgs {
   let acceptWorkspace = false;
   let detectWorkspace = true;
   let openPlayground = true;
+  let verbose = false;
 
   for (const arg of args) {
     if (arg === "--yes" || arg === "-y") {
@@ -26,10 +28,14 @@ export function parseIndexArgs(args: string[]): ParsedIndexArgs {
       openPlayground = true;
       continue;
     }
+    if (arg === "--verbose" || arg === "-v") {
+      verbose = true;
+      continue;
+    }
     throw new Error(
-      `Unknown index argument: ${arg}. Use --yes, --no-workspace, or --no-playground.`
+      `Unknown index argument: ${arg}. Use --yes, --no-workspace, --no-playground, or --verbose.`
     );
   }
 
-  return { acceptWorkspace, detectWorkspace, openPlayground };
+  return { acceptWorkspace, detectWorkspace, openPlayground, verbose };
 }

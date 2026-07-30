@@ -101,12 +101,14 @@ describe("index workspace flags", () => {
     expect(parseIndexArgs(["--yes", "--no-playground"])).toEqual({
       acceptWorkspace: true,
       detectWorkspace: true,
-      openPlayground: false
+      openPlayground: false,
+      verbose: false
     });
     expect(parseIndexArgs(["--no-workspace"])).toEqual({
       acceptWorkspace: false,
       detectWorkspace: false,
-      openPlayground: true
+      openPlayground: true,
+      verbose: false
     });
   });
 

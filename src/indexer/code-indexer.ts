@@ -27,6 +27,7 @@ export type CodeIndexStats = {
   symbolsIndexed: number;
   filesSkipped: number;
   filesPruned: number;
+  filesFailed: number;
 };
 
 type CodeMetadata = VectorMetadata & {
@@ -87,26 +88,46 @@ export class CodeIndexer {
     this.sqlitePath = resolve(sqlitePath);
   }
 
-  async indexCodebase(dirPath: string): Promise<CodeIndexStats> {
+  async indexCodebase(dirPath: string, options: { verbose?: boolean } = {}): Promise<CodeIndexStats> {
     const rootPath = resolve(dirPath);
+    const verbose = options.verbose ?? false;
     const collection = await this.getCollection();
     const filePaths = await this.findCodeFiles(rootPath);
     const stats: CodeIndexStats = {
       filesProcessed: 0,
       symbolsIndexed: 0,
       filesSkipped: 0,
-      filesPruned: 0
+      filesPruned: 0,
+      filesFailed: 0
     };
 
     this.initializeDb();
     stats.filesPruned = await this.pruneStaleFiles(collection, rootPath, filePaths);
     const vectorFilePaths = await this.readVectorFilePaths(collection);
 
+    if (verbose) {
+      console.log(`[verbose] Found ${filePaths.length} code files to index in ${rootPath}`);
+    }
+
     for (const filePath of filePaths) {
       const result = await this.indexFile(collection, filePath, rootPath, vectorFilePaths);
       if (result.skipped) {
         stats.filesSkipped += 1;
+        if (verbose) {
+          console.log(`  [skip]   ${relative(rootPath, filePath)} (unchanged)`);
+        }
         continue;
+      }
+
+      if (result.symbolsIndexed === 0 && result.attempted) {
+        stats.filesFailed += 1;
+        if (verbose) {
+          console.log(`  [FAIL]   ${relative(rootPath, filePath)} — 0 symbols (parser may have failed)`);
+        }
+      } else {
+        if (verbose) {
+          console.log(`  [index]  ${relative(rootPath, filePath)} — ${result.symbolsIndexed} symbol(s)`);
+        }
       }
 
       stats.filesProcessed += 1;
@@ -118,6 +139,14 @@ export class CodeIndexer {
       await depGraphBuilder.buildGraph(rootPath);
     } finally {
       depGraphBuilder.close();
+    }
+
+    if (verbose) {
+      console.log(`\n[verbose] Index summary:`);
+      console.log(`  Processed: ${stats.filesProcessed} files, ${stats.symbolsIndexed} symbols`);
+      console.log(`  Skipped:   ${stats.filesSkipped} files (unchanged)`);
+      console.log(`  Failed:    ${stats.filesFailed} files (0 symbols extracted)`);
+      console.log(`  Pruned:    ${stats.filesPruned} stale files`);
     }
 
     return stats;
@@ -182,12 +211,12 @@ export class CodeIndexer {
     filePath: string,
     projectPath: string,
     vectorFilePaths: Set<string>
-  ): Promise<{ skipped: boolean; symbolsIndexed: number }> {
+  ): Promise<{ skipped: boolean; symbolsIndexed: number; attempted: boolean }> {
     const content = await readFile(filePath, "utf8");
     const contentHash = hashContent(content);
 
     if (this.isUnchanged(filePath, contentHash, vectorFilePaths)) {
-      return { skipped: true, symbolsIndexed: 0 };
+      return { skipped: true, symbolsIndexed: 0, attempted: false };
     }
 
     const symbols = await this.parser.parseFileAsync(filePath);
@@ -199,7 +228,7 @@ export class CodeIndexer {
 
     this.upsertIndexedCodeFile(filePath, contentHash, symbols.length);
 
-    return { skipped: false, symbolsIndexed: symbols.length };
+    return { skipped: false, symbolsIndexed: symbols.length, attempted: true };
   }
 
   private async readVectorFilePaths(collection: CollectionLike): Promise<Set<string>> {

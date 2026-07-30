@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -212,58 +213,145 @@ function checkConfigEnv(loadedFiles: string[], activeProject: string): DoctorChe
 
 function checkIndexStatus(targetRepoPath: string): DoctorCheck {
   const codeDbPath = resolve(dataPath("infimium_code.db"));
+  const docsDbPath = resolve(dataPath("infimium_docs.db"));
 
-  if (!existsSync(codeDbPath)) {
+  if (!existsSync(codeDbPath) && !existsSync(docsDbPath)) {
     return fail(
       "Index status",
-      `No code index database found for current repo: ${targetRepoPath}.`,
+      `No index databases found. Run indexing for: ${targetRepoPath}.`,
       "npx infimium index"
     );
   }
 
   try {
-    const indexedFiles = readIndexedFileCount(codeDbPath, targetRepoPath);
+    const breakdown = readIndexBreakdown(codeDbPath, docsDbPath, targetRepoPath);
 
-    if (indexedFiles > 0) {
-      return pass(
+    if (breakdown.codeFiles === 0 && breakdown.docsFiles === 0) {
+      return fail(
         "Index status",
-        `Found ${indexedFiles} indexed file(s) for current repo: ${targetRepoPath}.`
+        `Index databases exist, but no files are indexed for: ${targetRepoPath}. ` +
+        `This can happen if path separators differ (Windows) or the project was indexed from a different directory.`,
+        "npx infimium index"
       );
     }
 
-    return fail(
-      "Index status",
-      `Index database exists, but no files are indexed for current repo: ${targetRepoPath}.`,
-      "npx infimium index"
-    );
+    const parts: string[] = [];
+    parts.push(`${breakdown.codeFiles} code file(s)`);
+    parts.push(`${breakdown.codeSymbols} symbol(s)`);
+    parts.push(`${breakdown.docsFiles} doc file(s)`);
+    parts.push(`${breakdown.docsChunks} doc chunk(s)`);
+
+    if (breakdown.codeFiles > 0 && breakdown.codeSymbols === 0) {
+      parts.push(
+        `⚠ ${breakdown.codeFiles} code file(s) indexed but 0 symbols extracted — ` +
+        `this usually means the AST parser failed for your file types. ` +
+        `Try: npx infimium index --verbose`
+      );
+      return fail(
+        "Index status",
+        parts.join(" · "),
+        "npx infimium index"
+      );
+    }
+
+    return pass("Index status", parts.join(" · "));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return fail(
       "Index status",
-      `Could not read code index for current repo: ${message}.`,
+      `Could not read index for current repo: ${message}.`,
       "npx infimium index"
     );
   }
 }
 
-function readIndexedFileCount(dbPath: string, targetRepoPath: string): number {
+type IndexBreakdown = {
+  codeFiles: number;
+  codeSymbols: number;
+  docsFiles: number;
+  docsChunks: number;
+};
+
+function readIndexBreakdown(
+  codeDbPath: string,
+  docsDbPath: string,
+  targetRepoPath: string
+): IndexBreakdown {
+  return {
+    ...readCodeBreakdown(codeDbPath, targetRepoPath),
+    ...readDocsBreakdown(docsDbPath, targetRepoPath)
+  };
+}
+
+function readCodeBreakdown(
+  dbPath: string,
+  targetRepoPath: string
+): { codeFiles: number; codeSymbols: number } {
+  if (!existsSync(dbPath)) {
+    return { codeFiles: 0, codeSymbols: 0 };
+  }
+
   const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   try {
     if (!tableExists(db, "indexed_code_files")) {
-      return 0;
+      return { codeFiles: 0, codeSymbols: 0 };
     }
 
-    const row = db
-      .prepare(
-        `SELECT COUNT(*) AS count
-         FROM indexed_code_files
-         WHERE file_path = ? OR file_path LIKE ?`
-      )
-      .get(targetRepoPath, `${targetRepoPath}/%`) as NumberRow | undefined;
+    const normalizedTarget = normalizePlatformPath(targetRepoPath);
+    const rows = db
+      .prepare("SELECT file_path, symbol_count FROM indexed_code_files")
+      .all() as Array<{ file_path?: unknown; symbol_count?: unknown }>;
 
-    return readCount(row);
+    let codeFiles = 0;
+    let codeSymbols = 0;
+    for (const row of rows) {
+      if (typeof row.file_path !== "string") continue;
+      const normalizedFile = normalizePlatformPath(row.file_path);
+      if (normalizedFile === normalizedTarget || normalizedFile.startsWith(`${normalizedTarget}/`)) {
+        codeFiles += 1;
+        codeSymbols += typeof row.symbol_count === "number" ? row.symbol_count : 0;
+      }
+    }
+    return { codeFiles, codeSymbols };
+  } finally {
+    db.close();
+  }
+}
+
+function readDocsBreakdown(
+  dbPath: string,
+  targetRepoPath: string
+): { docsFiles: number; docsChunks: number } {
+  if (!existsSync(dbPath)) {
+    return { docsFiles: 0, docsChunks: 0 };
+  }
+
+  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+
+  try {
+    if (!tableExists(db, "indexed_docs")) {
+      return { docsFiles: 0, docsChunks: 0 };
+    }
+
+    const normalizedTarget = normalizePlatformPath(targetRepoPath);
+    const rows = db
+      .prepare("SELECT file_path, chunk_count FROM indexed_docs")
+      .all() as Array<{ file_path?: unknown; chunk_count?: unknown }>;
+
+    let docsFiles = 0;
+    let docsChunks = 0;
+    for (const row of rows) {
+      if (typeof row.file_path !== "string") continue;
+      const normalizedFile = normalizePlatformPath(row.file_path);
+      if (normalizedFile === normalizedTarget || normalizedFile.startsWith(`${normalizedTarget}/`)) {
+        docsFiles += 1;
+        docsChunks += typeof row.chunk_count === "number" ? row.chunk_count : 0;
+      }
+    }
+    return { docsFiles, docsChunks };
   } finally {
     db.close();
   }
@@ -301,10 +389,29 @@ function fail(name: string, detail: string, fixCommand: string): DoctorCheck {
 async function readCommandVersion(command: string, args: string[]): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(command, args, { timeout: CHECK_TIMEOUT_MS });
-    return stdout.trim().split(/\s+/)[0] ?? null;
+    return extractVersionFromOutput(stdout);
   } catch {
     return null;
   }
+}
+
+function extractVersionFromOutput(stdout: string): string | null {
+  // On Windows, npm can print config warnings before the actual version.
+  // Scan all lines for a semver-like pattern and return the last match.
+  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let version: string | null = null;
+  for (const line of lines) {
+    const match = line.match(/^v?(\d+\.\d+\.\d+(?:[-+].*)?)$/);
+    if (match) {
+      version = match[1];
+    }
+  }
+  // Fallback: try to find a version anywhere in the output
+  if (!version) {
+    const fallback = stdout.match(/(\d+\.\d+\.\d+)/);
+    version = fallback ? fallback[1] : null;
+  }
+  return version;
 }
 
 async function commandExists(command: string): Promise<boolean> {
@@ -318,6 +425,20 @@ async function findOllamaBinary(): Promise<string | null> {
 
   if (process.platform === "darwin" && existsSync(MAC_OLLAMA_BINARY)) {
     return MAC_OLLAMA_BINARY;
+  }
+
+  if (process.platform === "win32") {
+    const windowsPaths = [
+      resolve(process.env.LOCALAPPDATA ?? "", "Programs", "Ollama", "ollama.exe"),
+      resolve(homedir(), "AppData", "Local", "Programs", "Ollama", "ollama.exe"),
+      "C:\\Program Files\\Ollama\\ollama.exe",
+      "C:\\Program Files (x86)\\Ollama\\ollama.exe"
+    ];
+    for (const binaryPath of windowsPaths) {
+      if (existsSync(binaryPath)) {
+        return binaryPath;
+      }
+    }
   }
 
   return null;
@@ -485,4 +606,11 @@ function embeddedStoreFixCommand(): string {
     return "powershell -Command \"New-Item -ItemType Directory -Force $HOME/.infimium/data\"";
   }
   return "mkdir -p ~/.infimium/data && chmod 700 ~/.infimium ~/.infimium/data";
+}
+
+function normalizePlatformPath(filePath: string): string {
+  // Normalize backslashes to forward slashes and lowercase on Windows
+  // to ensure cross-platform path comparison works correctly.
+  const normalized = filePath.replace(/\\/g, "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }

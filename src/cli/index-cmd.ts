@@ -51,14 +51,16 @@ export async function runIndexCommand(
   const config = loadConfig({ requireSearchApiKey: false });
   const cwd = options.cwd ?? process.cwd();
   const workspaceStartPath = config.codebasePath ?? config.localDocsPath ?? process.cwd();
-  const manifestPath = findWorkspaceManifest(cwd) ?? findWorkspaceManifest(workspaceStartPath);
-  if (manifestPath) {
-    await runIndexForWorkspace(config, loadWorkspace(manifestPath), workspaceStartPath);
-    await trackIndexCompleted({ workspace: true });
-    return;
-  }
 
+  // Only use workspace indexing if --no-workspace was NOT passed.
   if (parsedArgs.detectWorkspace) {
+    const manifestPath = findWorkspaceManifest(cwd) ?? findWorkspaceManifest(workspaceStartPath);
+    if (manifestPath) {
+      await runIndexForWorkspace(config, loadWorkspace(manifestPath), workspaceStartPath);
+      await trackIndexCompleted({ workspace: true });
+      return;
+    }
+
     const discovery =
       await detectMultiProjectWorkspace(cwd) ??
       (workspaceStartPath === cwd
@@ -97,7 +99,7 @@ export async function runIndexCommand(
   await runIndexForPaths(config, {
     localDocsPath: config.localDocsPath,
     codebasePath: config.codebasePath
-  });
+  }, { verbose: parsedArgs.verbose });
   await trackIndexCompleted({ workspace: false });
 }
 
@@ -196,17 +198,20 @@ export async function runIndexForWorkspace(
 
 export async function runIndexForPaths(
   config: Config,
-  paths: IndexPaths
+  paths: IndexPaths,
+  options: { verbose?: boolean } = {}
 ): Promise<IndexRunStats> {
   if (!paths.localDocsPath && !paths.codebasePath) {
     throw new Error("Missing LOCAL_DOCS_PATH or CODEBASE_PATH. Add one to your .env file.");
   }
 
+  const verbose = options.verbose ?? false;
   let docsFiles = 0;
   let codeSymbols = 0;
   let codeFiles = 0;
   let codeSkipped = 0;
   let filesPruned = 0;
+  let codeFilesFailed = 0;
 
   if (paths.localDocsPath) {
     const docIndexer = new DocIndexer(config);
@@ -228,15 +233,28 @@ export async function runIndexForPaths(
   }
 
   if (paths.codebasePath) {
-    const codeIndexer = new CodeIndexer(config);
-    try {
-      const codeStats = await codeIndexer.indexCodebase(paths.codebasePath);
-      codeSymbols = codeStats.symbolsIndexed;
-      codeFiles = codeStats.filesProcessed;
-      codeSkipped = codeStats.filesSkipped;
-      filesPruned += codeStats.filesPruned;
-    } finally {
-      codeIndexer.close();
+    // Pre-check: verify Ollama is reachable before starting expensive code indexing
+    const ollamaReachable = await checkOllamaReachable(config.ollamaHost);
+    if (!ollamaReachable) {
+      console.log(
+        `\n⚠ Ollama is not reachable at ${config.ollamaHost}.\n` +
+        `  Code indexing requires Ollama for embeddings.\n` +
+        `  Fix: Start Ollama with 'ollama serve' and ensure '${OLLAMA_EMBEDDING_MODEL}' is pulled.\n` +
+        `  Then re-run: npx infimium index\n` +
+        `  Skipping code indexing for now.`
+      );
+    } else {
+      const codeIndexer = new CodeIndexer(config);
+      try {
+        const codeStats = await codeIndexer.indexCodebase(paths.codebasePath, { verbose });
+        codeSymbols = codeStats.symbolsIndexed;
+        codeFiles = codeStats.filesProcessed;
+        codeSkipped = codeStats.filesSkipped;
+        filesPruned += codeStats.filesPruned;
+        codeFilesFailed = codeStats.filesFailed;
+      } finally {
+        codeIndexer.close();
+      }
     }
   }
 
@@ -249,13 +267,17 @@ export async function runIndexForPaths(
       summary:
         `Index ran for ${docsFiles} doc files; ` +
         `code processed ${codeFiles} files, skipped ${codeSkipped}, indexed ${codeSymbols} symbols; ` +
-        `pruned ${filesPruned} stale files`
+        `pruned ${filesPruned} stale files` +
+        (codeFilesFailed > 0 ? `; ${codeFilesFailed} file(s) failed to parse` : "")
     });
   } finally {
     memory.close();
   }
 
   console.log(`Docs: ${docsFiles} files. Code: ${codeSymbols} symbols across ${codeFiles} files.`);
+  if (codeFilesFailed > 0) {
+    console.log(`⚠ ${codeFilesFailed} code file(s) produced 0 symbols (parser may have failed). Run with --verbose for details.`);
+  }
   if (filesPruned > 0) {
     console.log(`Pruned ${filesPruned} deleted or excluded files from the index.`);
   }
@@ -281,4 +303,17 @@ function syncWorkspaceGraph(workspace: InfimiumWorkspace) {
 async function trackIndexCompleted(properties: { workspace: boolean }): Promise<void> {
   await trackTelemetry("index_completed", properties);
   await trackSetupCompleted({ source: "index" });
+}
+
+const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
+
+async function checkOllamaReachable(ollamaHost: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${ollamaHost}/api/tags`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }

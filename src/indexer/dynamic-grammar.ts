@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 
 import { Language, Parser } from "web-tree-sitter";
 
-export type DynamicGrammarName = "go" | "rust" | "java";
+export type DynamicGrammarName = "go" | "rust" | "java" | "typescript" | "javascript";
 
 export type DynamicGrammarOptions = {
   cacheDir?: string;
