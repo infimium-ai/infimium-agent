@@ -7,6 +7,7 @@
 Private context layer for AI coding agents. Search code and docs, inspect dependencies, preserve project memory, and build grounded plans from one local MCP server.
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
+[![MCP Badge](https://lobehub.com/badge/mcp/infimium-ai-infimium-agent?style=plastic)](https://lobehub.com/mcp/infimium-ai-infimium-agent)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
@@ -132,23 +133,23 @@ Infimium normally uses the MCP process working directory. If your client starts 
 
 ## CLI
 
-```bash
-infimium doctor
-infimium status
-infimium playground
-infimium index
-infimium watch
-infimium get-context
-infimium code-search "authentication middleware"
-infimium expand-symbol authenticateUser
-infimium docs-search "deployment setup"
-infimium dep-graph authenticateUser
-infimium plan --dry-run "add rate limiting"
-infimium remember "Rate limiter tests pass" --type progress --task "Rate limiting"
-infimium resume
-infimium memory complete
-infimium memory search "rate limiting decision"
-```
+| Command | Description |
+|---------|-------------|
+| `infimium doctor` | Run health checks on your dependencies and setup. |
+| `infimium status` | Show the current status of the index and memory. |
+| `infimium playground` | Launch the local web UI to explore index, graph, and memory. |
+| `infimium index` | Scan and index the current project directory (code, docs, dependencies). |
+| `infimium watch` | Run the indexer in watch mode to continuously index changes. |
+| `infimium get-context` | Output the full flattened context as YAML (`layer.md`). |
+| `infimium code-search <query>` | Semantically search code and return symbol signatures. |
+| `infimium expand-symbol <symbol>` | Fetch the full implementation code for a specific symbol. |
+| `infimium docs-search <query>` | Semantically search local markdown/text documentation. |
+| `infimium dep-graph <symbol>` | Show dependencies, callers, callees, and route graph. |
+| `infimium plan --dry-run "<task>"` | Draft an implementation plan based on a given prompt. |
+| `infimium remember "<note>"` | Add a milestone, progress, or decision to project memory. |
+| `infimium resume` | Show the active task and recent scratchpad memory events. |
+| `infimium memory complete` | Compact the active scratchpad into an archived milestone. |
+| `infimium memory search "<query>"` | Semantically search past project rules and memory ledger. |
 
 Use `npx infimium ...` if you did not install the package globally.
 
@@ -238,6 +239,29 @@ INFIMIUM_TELEMETRY=false
 ```
 
 ## Troubleshooting
+
+### FAQ & Common Confusions
+
+**Where is `layer.md`?**
+When you run `infimium get-context`, it intentionally prints the context directly to your terminal (`stdout`) so AI agents can read it instantly. It doesn't create a `layer.md` file in your workspace to avoid clutter. If you want to manually save it to a file, use terminal redirection:
+```bash
+infimium get-context > layer.md
+```
+
+**Why does the Playground UI say "Awaiting first agent interaction..."?**
+The `CURRENT TASK` tracker at the top of the Playground UI is designed to mirror exactly what your AI agent sees. If an agent hasn't queried the context yet (via the `get-context` tool), it waits. To force it to update, manually run `infimium get-context`.
+
+**How do I format `infimium remember`?**
+The `infimium remember` command requires a message and a `--type` flag (valid types: `note`, `progress`, `decision`, `blocker`, `index`, `plan`). If you also want it to update the active task in the Playground, include the `--task` flag:
+```bash
+infimium remember "Added rate limiting" --type progress --task "Security Features"
+```
+
+### Database is locked
+
+If you see `Failed to start Infimium: Database is locked`, it means another instance of Infimium is actively holding a lock on the SQLite memory database. This usually happens if you try to run `infimium index` manually in one terminal while `infimium playground` or `infimium watch` is still running in another. Simply stop the running process (Ctrl+C) before running manual commands.
+
+### General Setup Issues
 
 Run:
 

@@ -13,6 +13,7 @@ import Dart from "@sengac/tree-sitter-dart";
 import { dataPath } from "../paths.js";
 import { createVectorClient } from "../vector-store.js";
 import { CodeParser, type CodeSymbol } from "./code-parser.js";
+import { DynamicGrammarLoader } from "./dynamic-grammar.js";
 import {
   createProjectFilePolicy,
   filterProjectFiles
@@ -74,6 +75,7 @@ type HttpRouteRecord = {
 
 export class DepGraphBuilder {
   private db: import("node:sqlite").DatabaseSync | null = null;
+  private readonly dynamicGrammars = new DynamicGrammarLoader();
 
   constructor(
     private readonly vectorClient: VectorClientLike = createVectorClient(),
@@ -103,7 +105,7 @@ export class DepGraphBuilder {
         this.insertHttpRoute(route);
       }
 
-      const imports = extractImports(sourceFile)
+      const imports = (await extractImportsAsync(sourceFile, this.dynamicGrammars))
         .map((importPath) => resolveImport(sourceFile, importPath, dartPackageRoots))
         .filter((importedFile): importedFile is string => importedFile !== null);
 
@@ -499,7 +501,7 @@ async function findCodeFiles(rootPath: string): Promise<string[]> {
   return filterProjectFiles(matches, policy);
 }
 
-function extractImports(filePath: string): string[] {
+async function extractImportsAsync(filePath: string, dynamicGrammars: DynamicGrammarLoader): Promise<string[]> {
   const language = detectLanguage(filePath);
   if (!language) {
     return [];
@@ -511,15 +513,38 @@ function extractImports(filePath: string): string[] {
     }
 
     const source = readFileSync(filePath, "utf8");
-    const parser = new Parser();
-    parser.setLanguage(loadLanguage(filePath, language));
-    const tree = parser.parse(source);
-
-    if (tree.rootNode.hasError) {
-      return [];
+    
+    // Try native parser first
+    try {
+      const parser = new Parser();
+      parser.setLanguage(loadLanguage(filePath, language));
+      const tree = parser.parse(source);
+      if (!tree || tree.rootNode.hasError) {
+        return [];
+      }
+      return collectImports(tree.rootNode, language);
+    } catch (nativeError) {
+      if (language === "typescript" || language === "javascript") {
+        try {
+          const grammar = await dynamicGrammars.load(language);
+          const { Parser: WasmParser } = await import("web-tree-sitter");
+          const parser = new WasmParser();
+          parser.setLanguage(grammar);
+          const tree = parser.parse(source);
+          if (!tree || tree.rootNode.hasError) {
+            return [];
+          }
+          console.error(`Info: native tree-sitter failed for imports in ${filePath}, fell back to WASM parser successfully.`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return collectImports(tree.rootNode as any, language);
+        } catch (wasmError: unknown) {
+          const message = wasmError instanceof Error ? wasmError.message : String(wasmError);
+          console.error(`Warning: both native and WASM parsers failed for imports in ${filePath}: ${message}`);
+          return [];
+        }
+      }
+      throw nativeError;
     }
-
-    return collectImports(tree.rootNode, language);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Warning: failed to parse imports from ${filePath}: ${message}`);

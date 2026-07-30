@@ -1070,15 +1070,14 @@ function buildMetrics(
   observedAverageSkeletonTokens: number,
   observedAverageFullTextTokens: number
 ): PlaygroundMetrics {
-  const averageSkeletonTokens = symbolCount > 0 ? 8 : 0;
-  const averageFullTextTokens = symbolCount > 0 ? 1460 : 0;
   const hasUsefulObservedSavings = observedAverageFullTextTokens > observedAverageSkeletonTokens;
   const projectSkeletonTokens = hasUsefulObservedSavings
     ? observedAverageSkeletonTokens
-    : averageSkeletonTokens;
+    : (symbolCount > 0 ? 8 : 0);
   const projectFullTextTokens = hasUsefulObservedSavings
     ? observedAverageFullTextTokens
-    : averageFullTextTokens;
+    : (symbolCount > 0 ? 1460 : 0);
+
   const astFirstTokens = symbolCount * projectSkeletonTokens;
   const fullTextTokens = symbolCount * projectFullTextTokens;
   const totalTokensSaved = Math.max(0, fullTextTokens - astFirstTokens);
@@ -1090,8 +1089,8 @@ function buildMetrics(
     : 3;
   return {
     symbolCount,
-    averageSkeletonTokens,
-    averageFullTextTokens,
+    averageSkeletonTokens: projectSkeletonTokens,
+    averageFullTextTokens: projectFullTextTokens,
     observedAverageSkeletonTokens,
     observedAverageFullTextTokens,
     astFirstTokens,

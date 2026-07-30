@@ -454,7 +454,7 @@ async function handleSemanticCodeSearch(
   indexProjectInBackground(args.project_path);
   const projectPath = args.project_path
     ? resolveProjectPath(args.project_path)
-    : resolveMemoryProjectPath(readCodebasePath());
+    : resolveMemoryProjectPath(readCodebasePath(), true);
   const text = await runSemanticCodeSearch(
     {
       codebasePath: projectPath,
@@ -472,7 +472,7 @@ function handleDepGraph(args: DepGraphArguments): ToolResponse {
   indexProjectInBackground(args.project_path);
   const projectPath = args.project_path
     ? resolveProjectPath(args.project_path)
-    : resolveMemoryProjectPath(readCodebasePath());
+    : resolveMemoryProjectPath(readCodebasePath(), true);
   return textResponse(
     runDepGraph(args.symbol_name, {
       codebasePath: projectPath
@@ -483,7 +483,7 @@ function handleDepGraph(args: DepGraphArguments): ToolResponse {
 function handleExpandSymbol(args: ExpandSymbolArguments): ToolResponse {
   const projectPath = args.project_path
     ? resolveProjectPath(args.project_path)
-    : resolveMemoryProjectPath(readCodebasePath());
+    : resolveMemoryProjectPath(readCodebasePath(), true);
   return textResponse(
     expandSymbol({
       codebasePath: projectPath,
@@ -509,7 +509,7 @@ async function handlePlan(args: PlanArguments): Promise<ToolResponse> {
   indexProjectInBackground(args.project_path);
   const codebasePath = args.project_path
     ? resolveProjectPath(args.project_path)
-    : resolveMemoryProjectPath(config.codebasePath);
+    : resolveMemoryProjectPath(config.codebasePath, true);
   const text = await runPlanTool({
     task: args.task,
     dryRun: args.dry_run ?? false,
@@ -645,7 +645,7 @@ export async function startServer(): Promise<void> {
   let contextLayer: ReturnType<typeof startContextLayerAutoWriter> | null = null;
   try {
     contextLayer = startContextLayerAutoWriter({
-      projectPath: resolveMemoryProjectPath(config.codebasePath),
+      projectPath: resolveMemoryProjectPath(config.codebasePath, true),
       activateProject: false
     });
   } catch (error: unknown) {

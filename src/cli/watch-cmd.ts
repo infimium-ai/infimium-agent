@@ -41,6 +41,7 @@ export async function runWatchCommand(args: string[] = process.argv.slice(3)): P
   }
 
   console.log("Infimium auto-index running. Press Ctrl+C to stop.");
+  await new Promise(() => {});
 }
 
 export async function startAutoIndex(options: WatchIndexOptions = {}): Promise<WatchIndexHandle> {
