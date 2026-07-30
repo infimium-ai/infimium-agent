@@ -240,6 +240,23 @@ INFIMIUM_TELEMETRY=false
 
 ## Troubleshooting
 
+### FAQ & Common Confusions
+
+**Where is `layer.md`?**
+When you run `infimium get-context`, it intentionally prints the context directly to your terminal (`stdout`) so AI agents can read it instantly. It doesn't create a `layer.md` file in your workspace to avoid clutter. If you want to manually save it to a file, use terminal redirection:
+```bash
+infimium get-context > layer.md
+```
+
+**Why does the Playground UI say "Awaiting first agent interaction..."?**
+The `CURRENT TASK` tracker at the top of the Playground UI is designed to mirror exactly what your AI agent sees. If an agent hasn't queried the context yet (via the `get-context` tool), it waits. To force it to update, manually run `infimium get-context`.
+
+**How do I format `infimium remember`?**
+The `infimium remember` command requires a message and a `--type` flag (valid types: `note`, `progress`, `decision`, `blocker`, `index`, `plan`). If you also want it to update the active task in the Playground, include the `--task` flag:
+```bash
+infimium remember "Added rate limiting" --type progress --task "Security Features"
+```
+
 ### Database is locked
 
 If you see `Failed to start Infimium: Database is locked`, it means another instance of Infimium is actively holding a lock on the SQLite memory database. This usually happens if you try to run `infimium index` manually in one terminal while `infimium playground` or `infimium watch` is still running in another. Simply stop the running process (Ctrl+C) before running manual commands.
