@@ -16,7 +16,7 @@ import {
 import { runPlanTool } from "./commands/plan.js";
 import { startContextLayerAutoWriter } from "./memory/context-layer.js";
 import { resolveProjectPath } from "./paths.js";
-import { trackFirstToolCall, trackTelemetry } from "./telemetry.js";
+import { trackFirstToolCall, trackTelemetry, trackToolCall } from "./telemetry.js";
 import { runDepGraph } from "./tools/dep-graph.js";
 import { expandSymbol } from "./tools/expand-symbol.js";
 import { runFetchUrl } from "./tools/fetch-url.js";
@@ -557,7 +557,7 @@ export function createServer(): Server {
   const server = new Server(
     {
       name: "infimium",
-      version: "0.5.0"
+      version: "0.5.8"
     },
     {
       capabilities: {
@@ -583,6 +583,7 @@ export function createServer(): Server {
 
     const parsedArgs = tool.schema.parse(request.params.arguments ?? {});
     void trackFirstToolCall(tool.name);
+    void trackToolCall(tool.name);
 
     if (tool.name === "hello_infimium") {
       return textResponse("hey-dude");

@@ -112,11 +112,22 @@ async function checkNodeAndNpm(packageJson: PackageJson): Promise<DoctorCheck> {
     return pass("Node/npm version", `Node ${nodeVersion} satisfies ${nodeEngine}; ${npmDetail}.`);
   }
 
-  const npmDetail = npmVersion === null ? "npm was not found" : `npm ${npmVersion}`;
+  if (!nodeOk) {
+    return fail(
+      "Node/npm version",
+      `Node ${nodeVersion} does not satisfy ${nodeEngine}.`,
+      nodeUpgradeCommand()
+    );
+  }
+
+  const npmDetail =
+    npmVersion === null
+      ? "npm was not found on PATH or could not be executed"
+      : `npm ${npmVersion} does not satisfy ${npmEngine ?? "requirements"}`;
   return fail(
     "Node/npm version",
-    `Node ${nodeVersion} does not satisfy ${nodeEngine}, or ${npmDetail} is not usable.`,
-    nodeUpgradeCommand()
+    `Node ${nodeVersion} satisfies ${nodeEngine}, but ${npmDetail}.`,
+    "npm --version"
   );
 }
 
@@ -388,7 +399,10 @@ function fail(name: string, detail: string, fixCommand: string): DoctorCheck {
 
 async function readCommandVersion(command: string, args: string[]): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(command, args, { timeout: CHECK_TIMEOUT_MS });
+    const { stdout } = await execFileAsync(command, args, {
+      timeout: CHECK_TIMEOUT_MS,
+      shell: process.platform === "win32"
+    });
     return extractVersionFromOutput(stdout);
   } catch {
     return null;

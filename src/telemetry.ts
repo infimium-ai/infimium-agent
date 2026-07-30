@@ -125,6 +125,24 @@ export async function trackFirstToolCall(
   });
 }
 
+export async function trackToolCall(
+  toolName: string,
+  options: TrackOptions = {}
+): Promise<void> {
+  const record = await readOrCreateInstallRecord(options.installPath);
+  if (!isTelemetryEnabled(record)) {
+    return;
+  }
+
+  void trackTelemetry(
+    "tool_call",
+    {
+      tool_name: toolName
+    },
+    { installPath: options.installPath }
+  );
+}
+
 export async function setTelemetryEnabled(
   enabled: boolean,
   installPath?: string
