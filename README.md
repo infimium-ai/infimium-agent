@@ -7,6 +7,7 @@
 Private context layer for AI coding agents. Search code and docs, inspect dependencies, preserve project memory, and build grounded plans from one local MCP server.
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
+[![MCP Badge](https://lobehub.com/badge/mcp/infimium-ai-infimium-agent?style=plastic)](https://lobehub.com/mcp/infimium-ai-infimium-agent)
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
 
