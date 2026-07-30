@@ -36,24 +36,6 @@ query: "price calculation logic"
 -> callers: getListingPrice(), estimatePropertyTax()
 ```
 
-## 1,460 Tokens -> 8
-
-Infimium drops the initial payload cost from approximately **1,460 tokens to 8 tokens per symbol**. Semantic search returns the AST signature first; the agent requests the full implementation only when it needs it with `expand_symbol`.
-
-```text
-Full implementation   ~1,460 tokens
-AST skeleton               ~8 tokens
-Initial payload reduction  ~99.5%
-```
-
-These are Playground reference values, not a claim that every function has the same size. Inspect your own indexed repository and compare AST-first retrieval with full-text retrieval locally:
-
-```bash
-infimium playground
-```
-
-Open **Token Economics** to see the estimated token difference across your actual indexed symbols.
-
 ## Quick Start
 
 Requires Node.js 22.5+. From your project folder:
@@ -140,6 +122,7 @@ Infimium normally uses the MCP process working directory. If your client starts 
 |---------|-------------|
 | `infimium doctor` | Run health checks on your dependencies and setup. |
 | `infimium status` | Show the current status of the index and memory. |
+| `infimium --help` | Shows all relevant cli commands. |
 | `infimium playground` | Launch the local web UI to explore index, graph, and memory. |
 | `infimium index` | Scan and index the current project directory (code, docs, dependencies). |
 | `infimium watch` | Run the indexer in watch mode to continuously index changes. |
@@ -216,6 +199,23 @@ infimium index --yes --no-playground
 
 Use `--no-workspace` to index only the current project. Workspace projects keep separate memory and Git state while `get_context` includes balanced summaries and graph relationships from related projects.
 
+## Infimium - Playground 
+
+Infimium drops the initial payload cost from approximately **1,460 tokens to 8 tokens per symbol**. Semantic search returns the AST signature first; the agent requests the full implementation only when it needs it with `expand_symbol`.
+
+```text
+Full implementation   ~1,460 tokens
+AST skeleton               ~8 tokens
+Initial payload reduction  ~99.5%
+```
+
+These are Playground reference values, not a claim that every function has the same size. Inspect your own indexed repository and compare AST-first retrieval with full-text retrieval locally:
+
+```bash
+infimium playground
+```
+
+Open **Token Economics** to see the estimated token difference across your actual indexed symbols.
 ## Privacy
 
 Code, docs, embeddings, memory, graph data, prompts, queries, file paths, and repo names remain local.
