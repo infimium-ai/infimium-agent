@@ -320,6 +320,16 @@ function isTelemetryEnabled(record: InstallRecord): boolean {
     return true;
   }
 
+  // Auto-disable telemetry in CI environments and test runners
+  if (
+    process.env.CI === "true" ||
+    process.env.CI === "1" ||
+    process.env.GITHUB_ACTIONS === "true" ||
+    process.env.NODE_ENV === "test"
+  ) {
+    return false;
+  }
+
   return true;
 }
 
