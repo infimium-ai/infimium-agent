@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="public/infimium-logo.png" alt="Infimium" width="200" />
+  <img src="public/infimium-logo.png" alt="Infimium" width="300" />
 </p>
 
 # Infimium
 
 The Private Context Layer & Super Brain for Your Codebase.
-Give AI agents persistent memory, deep dependency graphs, and instant code context—100% local, zero token bloat.
+Give AI agents persistent memory, deep dependency graphs, and instant code context -- 100% local, zero token bloat.
 
 
 
