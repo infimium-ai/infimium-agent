@@ -102,6 +102,48 @@ describe("CodeSearchTool", () => {
     expect(output).toContain("score: 0.48");
   });
 
+  it("retries transient Ollama embedding failures before querying code", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("fetch failed"))
+      .mockResolvedValueOnce(embeddingResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const collection = {
+      count: vi.fn().mockResolvedValue(1),
+      query: vi.fn().mockResolvedValue({
+        documents: [["export function resilientSearch() {}"]],
+        metadatas: [[{
+          name: "resilientSearch",
+          filePath: "src/search.ts",
+          lineStart: 10,
+          lineEnd: 12,
+          language: "typescript"
+        }]],
+        distances: [[0.1]]
+      })
+    };
+
+    const output = await runSemanticCodeSearch(
+      {
+        codebasePath: "/code",
+        ollamaHost: "http://ollama.test",
+        vectorClient: fakeClient(collection),
+        retryConfig: {
+          maxAttempts: 2,
+          initialDelayMs: 0,
+          maxDelayMs: 0,
+          backoffMultiplier: 1
+        }
+      },
+      "resilient search",
+      undefined,
+      1
+    );
+
+    expect(output).toContain("resilientSearch()");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(collection.query).toHaveBeenCalledOnce();
+  });
+
   it("returns the not configured message", async () => {
     const collection = {
       count: vi.fn(),
