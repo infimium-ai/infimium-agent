@@ -2,6 +2,13 @@ import { resolve } from "node:path";
 
 import { createVectorClient } from "../vector-store.js";
 import { DEFAULT_OLLAMA_HOST } from "./query-local-docs.js";
+import {
+  CircuitBreaker,
+  CircuitBreakerOpenError,
+  isTransientError,
+  type RetryConfig,
+  retryWithBackoff
+} from "./resilience.js";
 
 const COLLECTION_NAME = "infimium_code";
 const OLLAMA_EMBEDDING_MODEL = "nomic-embed-text";
@@ -57,23 +64,40 @@ type CodeSearchOptions = {
   codebasePath: string | null;
   ollamaHost?: string;
   vectorClient?: VectorClientLike;
+  retryConfig?: RetryConfig;
 };
 
 export class CodeSearchUnavailableError extends Error {
-  constructor() {
-    super("Code search unavailable. Embedded vector index could not be opened.");
+  readonly details: string | undefined;
+
+  constructor(details?: string) {
+    const message = details
+      ? `Code search unavailable: ${details}`
+      : "Code search unavailable. Embedded vector index could not be opened.";
+    super(message);
+    this.name = "CodeSearchUnavailableError";
+    this.details = details;
   }
 }
 
 export class CodeSearchNotConfiguredError extends Error {
   constructor() {
     super("Add CODEBASE_PATH to your .env");
+    this.name = "CodeSearchNotConfiguredError";
   }
 }
 
 export class CodeSearchEmptyError extends Error {
   constructor() {
     super("Code not indexed. Run: infimium index");
+    this.name = "CodeSearchEmptyError";
+  }
+}
+
+export class CodeSearchDegradedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CodeSearchDegradedError";
   }
 }
 
@@ -81,11 +105,15 @@ export class CodeSearchTool {
   private readonly codebasePath: string | null;
   private readonly ollamaHost: string;
   private readonly vectorClient: VectorClientLike;
+  private readonly ollamaCircuitBreaker: CircuitBreaker;
+  private readonly retryConfig: RetryConfig | undefined;
 
   constructor(options: CodeSearchOptions) {
     this.codebasePath = options.codebasePath ? resolve(options.codebasePath) : null;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
     this.vectorClient = options.vectorClient ?? createVectorClient();
+    this.retryConfig = options.retryConfig;
+    this.ollamaCircuitBreaker = new CircuitBreaker(3, 10_000, 1);
   }
 
   async search(
@@ -98,10 +126,34 @@ export class CodeSearchTool {
       throw new CodeSearchNotConfiguredError();
     }
 
-    const collection = await this.getCollection();
-    const queryEmbedding = await this.embedQuery(query);
+    try {
+      const collection = await this.getCollection();
+      const queryEmbedding = await this.embedQueryWithRetry(query);
+      return this.queryCollection(collection, queryEmbedding, language, topK, codebasePath);
+    } catch (error: unknown) {
+      if (error instanceof CircuitBreakerOpenError) {
+        throw new CodeSearchDegradedError(
+          "Semantic search is temporarily unavailable (Ollama unreachable). Try again in a few seconds."
+        );
+      }
 
-    return this.queryCollection(collection, queryEmbedding, language, topK, codebasePath);
+      if (isTransientError(error)) {
+        throw new CodeSearchDegradedError(
+          "Semantic search is temporarily unavailable (Ollama unreachable). Try again in a few seconds."
+        );
+      }
+
+      if (
+        error instanceof CodeSearchUnavailableError ||
+        error instanceof CodeSearchNotConfiguredError ||
+        error instanceof CodeSearchEmptyError ||
+        error instanceof CodeSearchDegradedError
+      ) {
+        throw error;
+      }
+
+      throw error;
+    }
   }
 
   private async getCollection(): Promise<CollectionLike> {
@@ -111,11 +163,13 @@ export class CodeSearchTool {
         embeddingFunction: null
       });
     } catch (error: unknown) {
-      if (isConnectionError(error)) {
+      if (isTransientError(error)) {
         throw new CodeSearchUnavailableError();
       }
 
-      throw error;
+      throw new CodeSearchUnavailableError(
+        error instanceof Error ? error.message : "Unknown error opening vector store"
+      );
     }
   }
 
@@ -153,12 +207,22 @@ export class CodeSearchTool {
         throw error;
       }
 
-      if (isConnectionError(error)) {
+      if (isTransientError(error)) {
         throw new CodeSearchUnavailableError();
       }
 
-      throw error;
+      throw new CodeSearchUnavailableError(
+        error instanceof Error ? error.message : "Vector store query error"
+      );
     }
+  }
+
+  private async embedQueryWithRetry(query: string): Promise<number[]> {
+    return retryWithBackoff(
+      () => this.ollamaCircuitBreaker.execute(() => this.embedQuery(query)),
+      (error) => isTransientError(error) && !(error instanceof CircuitBreakerOpenError),
+      this.retryConfig
+    );
   }
 
   private async embedQuery(query: string): Promise<number[]> {
@@ -250,20 +314,6 @@ function distanceToScore(distance: number): number {
   return 1 / (1 + Math.log1p(Math.max(0, distance)));
 }
 
-function isConnectionError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("econnrefused") ||
-    message.includes("connection refused") ||
-    message.includes("failed to connect") ||
-    message.includes("sqlite")
-  );
-}
-
 export function formatCodeResults(results: CodeResult[]): string {
   if (results.length === 0) {
     return "Code not indexed. Run: infimium index";
@@ -286,15 +336,24 @@ export async function runSemanticCodeSearch(
   try {
     const search = new CodeSearchTool(options);
     const results = await search.search(query, language, topK);
-
     return formatCodeResults(results);
   } catch (error: unknown) {
-    if (
-      error instanceof CodeSearchUnavailableError ||
-      error instanceof CodeSearchNotConfiguredError ||
-      error instanceof CodeSearchEmptyError
-    ) {
+    if (error instanceof CodeSearchNotConfiguredError) {
       return error.message;
+    }
+
+    if (error instanceof CodeSearchEmptyError) {
+      return error.message;
+    }
+
+    if (error instanceof CodeSearchDegradedError) {
+      return `${error.message}\nTip: Check Ollama status with 'infimium doctor' or run 'ollama serve'.`;
+    }
+
+    if (error instanceof CodeSearchUnavailableError) {
+      return error.details
+        ? `${error.message}\nTip: Run 'infimium doctor' to diagnose issues.`
+        : error.message;
     }
 
     const message = error instanceof Error ? error.message : String(error);
