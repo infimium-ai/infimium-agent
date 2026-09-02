@@ -6,7 +6,13 @@ import { resolve } from "node:path";
 
 import { Language, Parser } from "web-tree-sitter";
 
-export type DynamicGrammarName = "go" | "rust" | "java" | "typescript" | "javascript";
+export type DynamicGrammarName =
+  | "go"
+  | "rust"
+  | "java"
+  | "csharp"
+  | "typescript"
+  | "javascript";
 
 export type DynamicGrammarOptions = {
   cacheDir?: string;
@@ -16,6 +22,15 @@ export type DynamicGrammarOptions = {
 
 const GRAMMAR_PACKAGE_VERSION = "0.1.17";
 const DEFAULT_BASE_URL = `https://unpkg.com/@repomix/tree-sitter-wasms@${GRAMMAR_PACKAGE_VERSION}/out`;
+
+const GRAMMAR_FILES: Record<DynamicGrammarName, string> = {
+  go: "tree-sitter-go.wasm",
+  rust: "tree-sitter-rust.wasm",
+  java: "tree-sitter-java.wasm",
+  csharp: "tree-sitter-c_sharp.wasm",
+  typescript: "tree-sitter-typescript.wasm",
+  javascript: "tree-sitter-javascript.wasm"
+};
 const MAX_GRAMMAR_BYTES = 8 * 1024 * 1024;
 const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d];
 const require = createRequire(import.meta.url);
@@ -31,8 +46,8 @@ export class DynamicGrammarLoader {
   constructor(options: DynamicGrammarOptions = {}) {
     this.cacheDir = resolve(
       options.cacheDir ??
-        process.env.INFIMIUM_GRAMMAR_DIR?.trim() ??
-        resolve(homedir(), ".infimium", "grammars")
+          process.env.INFIMIUM_GRAMMAR_DIR?.trim() ??
+          resolve(homedir(), ".infimium", "grammars")
     );
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
     this.fetcher = options.fetcher ?? fetch;
@@ -55,7 +70,8 @@ export class DynamicGrammarLoader {
   }
 
   async ensureGrammar(name: DynamicGrammarName): Promise<string> {
-    const grammarPath = resolve(this.cacheDir, `tree-sitter-${name}.wasm`);
+    const grammarFile = GRAMMAR_FILES[name];
+    const grammarPath = resolve(this.cacheDir, grammarFile);
     if (existsSync(grammarPath)) {
       const existing = await readFile(grammarPath);
       if (isValidWasm(existing)) {
@@ -65,7 +81,7 @@ export class DynamicGrammarLoader {
     }
 
     await mkdir(this.cacheDir, { recursive: true });
-    const response = await this.fetcher(`${this.baseUrl}/tree-sitter-${name}.wasm`);
+    const response = await this.fetcher(`${this.baseUrl}/${grammarFile}`);
     if (!response.ok) {
       throw new Error(`Failed to download ${name} grammar: HTTP ${response.status}`);
     }

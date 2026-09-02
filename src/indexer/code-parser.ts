@@ -21,7 +21,8 @@ export type CodeLanguage =
   | "dart"
   | "go"
   | "rust"
-  | "java";
+  | "java"
+  | "csharp";
 
 export type CodeSymbol = {
   name: string;
@@ -43,7 +44,8 @@ const DART_EXTENSIONS = new Set([".dart"]);
 const DYNAMIC_EXTENSIONS = new Map<string, DynamicGrammarName>([
   [".go", "go"],
   [".rs", "rust"],
-  [".java", "java"]
+  [".java", "java"],
+  [".cs", "csharp"]
 ]);
 const { tsx, typescript } = TypeScriptGrammars;
 
@@ -90,7 +92,7 @@ export class CodeParser {
       return this.parseFile(filePath);
     }
 
-    // Go, Rust, Java: always use WASM parser (no native bindings bundled)
+    // Go, Rust, Java, C#: always use WASM parser (no native bindings bundled)
     if (isWasmOnlyLanguage(language)) {
       try {
         const source = readFileSync(filePath, "utf8");
@@ -185,8 +187,15 @@ function isDynamicLanguage(language: CodeLanguage): language is DynamicGrammarNa
   return language === "go" || language === "rust" || language === "java" || language === "typescript" || language === "javascript";
 }
 
-function isWasmOnlyLanguage(language: CodeLanguage): language is "go" | "rust" | "java" {
-  return language === "go" || language === "rust" || language === "java";
+function isWasmOnlyLanguage(
+  language: CodeLanguage
+): language is "go" | "rust" | "java" | "csharp" {
+  return (
+    language === "go" ||
+    language === "rust" ||
+    language === "java" ||
+    language === "csharp"
+  );
 }
 
 function extractDynamicSymbols(
@@ -249,6 +258,26 @@ function dynamicSymbolType(
     if (node.type === "class_declaration") return "class";
     if (node.type === "method_definition") return "method";
     if (node.type === "arrow_function") return "arrow_function";
+  }
+  if (language === "csharp") {
+    if (
+      [
+        "class_declaration",
+        "interface_declaration",
+        "struct_declaration",
+        "enum_declaration",
+        "record_declaration"
+      ].includes(node.type)
+    ) {
+      return "class";
+    }
+
+    if (
+      node.type === "method_declaration" ||
+      node.type === "constructor_declaration"
+    ) {
+      return "method";
+    }
   }
 
   return null;
