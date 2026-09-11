@@ -105,7 +105,8 @@ Infimium normally uses the MCP process working directory. If your client starts 
 | Tool | What it does |
 | --- | --- |
 | `hello_infimium` | Confirms the MCP server is healthy. |
-| `get_context` | Loads tri-zonal YAML context: stable repo anchors, live Git/index state, and active execution. |
+| `get_context` | Reads saved YAML repo context, current memory and handoff; explicit refresh updates Git/index state. |
+| `infimium_update` | Refreshes episodic memory and handoff graphs; controls automatic memory checkpoints. |
 | `semantic_code_search` | Finds code by meaning and returns symbol signatures first. |
 | `expand_symbol` | Loads one full implementation only when needed. |
 | `query_local_docs` | Searches local Markdown, text, HTML, and PDF files. |
@@ -140,6 +141,21 @@ Infimium normally uses the MCP process working directory. If your client starts 
 Use `npx infimium ...` if you did not install the package globally.
 
 ## Project Memory
+
+Refresh memory yourself, or enable periodic checkpoints for the current project:
+
+```bash
+infimium update --note "Implemented login validation" --task "Finish login" --handoff "Run the auth tests next"
+infimium update start --interval 300
+infimium update status
+infimium update stop
+```
+
+Replace the example notes with your own. Add `--project /path/to/repo` to select a project and `--file src/auth.ts` to attach a relevant file. `infimium_update` and `infimium-update` are CLI aliases. MCP agents use the `infimium_update` tool with `action: refresh|start|stop|status`, `project_path`, and optional `note`, `task`, `handoff`, `files`, or `interval_seconds`.
+
+Auto-update is opt-in and runs while the foreground CLI watcher or an MCP server is open. Its per-project setting survives restarts; `stop` disables future checkpoints (an in-flight refresh may finish). Checkpoints link episodes, tasks, file references, and handoff notes in local SQLite. Unchanged observations are deduplicated. Automatic checkpoints record observable state, not guessed intent, and never mark a task complete.
+
+`get-context` / `get_context` now reads saved context and current memory without rescanning the repo. It includes a bounded memory graph and guidance to answer repo-overview questions only when asked, using Infimium memory first. Missing context is reported explicitly. Run `infimium update` or `get-context --refresh` to refresh filesystem context. These are agent guidelines, not an enforcement mechanism for other clients.
 
 Infimium keeps memory bounded across long sessions:
 
@@ -246,13 +262,13 @@ INFIMIUM_TELEMETRY=false
 ### FAQ & Common Confusions
 
 **Where is `layer.md`?**
-When you run `infimium get-context`, it intentionally prints the context directly to your terminal (`stdout`) so AI agents can read it instantly. It doesn't create a `layer.md` file in your workspace to avoid clutter. If you want to manually save it to a file, use terminal redirection:
+When you run `infimium get-context`, it prints saved context directly to your terminal (`stdout`). Refreshes store project-scoped YAML under Infimium's local data directory. To export the saved context to a file, use terminal redirection:
 ```bash
 infimium get-context > layer.md
 ```
 
 **Why does the Playground UI say "Awaiting first agent interaction..."?**
-The `CURRENT TASK` tracker at the top of the Playground UI is designed to mirror exactly what your AI agent sees. If an agent hasn't queried the context yet (via the `get-context` tool), it waits. To force it to update, manually run `infimium get-context`.
+The `CURRENT TASK` tracker reflects stored project context. Run `infimium update --task "Your task"` to refresh it; `get-context` reads the saved snapshot.
 
 **How do I format `infimium remember`?**
 The `infimium remember` command requires a message and a `--type` flag (valid types: `note`, `progress`, `decision`, `blocker`, `index`, `plan`). If you also want it to update the active task in the Playground, include the `--task` flag:

@@ -5,7 +5,6 @@ import {
   ListToolsRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { runIndexForProject } from "./cli/index-cmd.js";
 import { startAutoIndex } from "./cli/watch-cmd.js";
 import { loadConfig } from "./config.js";
 import {
@@ -15,6 +14,8 @@ import {
 } from "./commands/memory.js";
 import { runPlanTool } from "./commands/plan.js";
 import { startContextLayerAutoWriter } from "./memory/context-layer.js";
+import { runInfimiumUpdateTool, type InfimiumUpdateArgs } from "./commands/infimium-update.js";
+import { startMemoryUpdateWorker } from "./memory/update-memory.js";
 import { resolveProjectPath } from "./paths.js";
 import { trackFirstToolCall, trackTelemetry, trackToolCall } from "./telemetry.js";
 import { runDepGraph } from "./tools/dep-graph.js";
@@ -118,6 +119,32 @@ type GetContextArguments = {
 };
 
 const toolDefinitions = [
+  {
+    name: "infimium_update",
+    description: "On user request, refresh episodic project memory and its handoff graph, or start/stop/status automatic memory updates. Not a package upgrade. Explicit project_path is recommended.",
+    schema: z.object({
+      action: z.enum(["refresh", "start", "stop", "status"]).default("refresh"),
+      project_path: z.string().optional(),
+      note: z.string().trim().min(1).max(2000).optional(),
+      task: z.string().trim().min(1).max(2000).optional(),
+      handoff: z.string().trim().min(1).max(2000).optional(),
+      files: z.array(z.string().min(1)).max(10).optional(),
+      interval_seconds: z.number().int().min(10).max(86400).optional()
+    }),
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["refresh", "start", "stop", "status"], default: "refresh" },
+        project_path: { type: "string" },
+        note: { type: "string", minLength: 1, maxLength: 2000 },
+        task: { type: "string", minLength: 1, maxLength: 2000 },
+        handoff: { type: "string", minLength: 1, maxLength: 2000 },
+        files: { type: "array", items: { type: "string" }, maxItems: 10 },
+        interval_seconds: { type: "integer", minimum: 10, maximum: 86400, default: 300 }
+      },
+      additionalProperties: false
+    }
+  },
   {
     name: "hello_infimium",
     description: "Health probe for the Infimium MCP server.",
@@ -340,9 +367,9 @@ const toolDefinitions = [
   {
     name: "get_context",
     description:
-      "Read the balanced YAML context layer with repo overview, Git state, task, memory, and AST-first handoff guidance. Pass project_path once to activate the current IDE workspace as the default.",
+      "Read stored YAML repo overview, task, episodic memory graph and handoff without rescanning. Answer overview questions only when asked. Use refresh=true only when the user requests updated filesystem context; otherwise disclose missing/stale context.",
     schema: z.object({
-      refresh: z.boolean().default(true).optional(),
+      refresh: z.boolean().default(false).optional(),
       limit: z.number().int().positive().default(8).optional(),
       format: z.enum(["yaml", "json"]).default("yaml").optional(),
       project_path: z.string().optional()
@@ -350,7 +377,7 @@ const toolDefinitions = [
     inputSchema: {
       type: "object",
       properties: {
-        refresh: { type: "boolean", default: true },
+        refresh: { type: "boolean", default: false },
         limit: { type: "number", default: 8 },
         format: {
           type: "string",
@@ -408,31 +435,7 @@ function readOllamaHost(): string {
   return process.env.OLLAMA_HOST?.trim() || DEFAULT_OLLAMA_HOST;
 }
 
-const indexingProjects = new Set<string>();
-
-function indexProjectInBackground(projectPath?: string | null): void {
-  if (!projectPath?.trim()) {
-    return;
-  }
-
-  const resolvedProjectPath = resolveProjectPath(projectPath);
-  if (indexingProjects.has(resolvedProjectPath)) {
-    return;
-  }
-
-  indexingProjects.add(resolvedProjectPath);
-  void runIndexForProject(resolvedProjectPath)
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Background index failed for ${resolvedProjectPath}: ${message}`);
-    })
-    .finally(() => {
-      indexingProjects.delete(resolvedProjectPath);
-    });
-}
-
 async function handleQueryLocalDocs(args: QueryLocalDocsArguments): Promise<ToolResponse> {
-  indexProjectInBackground(args.project_path);
   const localDocsPath = args.project_path
     ? resolveProjectPath(args.project_path)
     : readLocalDocsPath();
@@ -451,7 +454,6 @@ async function handleQueryLocalDocs(args: QueryLocalDocsArguments): Promise<Tool
 async function handleSemanticCodeSearch(
   args: SemanticCodeSearchArguments
 ): Promise<ToolResponse> {
-  indexProjectInBackground(args.project_path);
   const projectPath = args.project_path
     ? resolveProjectPath(args.project_path)
     : resolveMemoryProjectPath(readCodebasePath(), true);
@@ -469,7 +471,6 @@ async function handleSemanticCodeSearch(
 }
 
 function handleDepGraph(args: DepGraphArguments): ToolResponse {
-  indexProjectInBackground(args.project_path);
   const projectPath = args.project_path
     ? resolveProjectPath(args.project_path)
     : resolveMemoryProjectPath(readCodebasePath(), true);
@@ -506,7 +507,6 @@ async function handleShell(args: ShellArguments): Promise<ToolResponse> {
 
 async function handlePlan(args: PlanArguments): Promise<ToolResponse> {
   const config = loadConfig({ requireSearchApiKey: false });
-  indexProjectInBackground(args.project_path);
   const codebasePath = args.project_path
     ? resolveProjectPath(args.project_path)
     : resolveMemoryProjectPath(config.codebasePath, true);
@@ -525,12 +525,10 @@ async function handlePlan(args: PlanArguments): Promise<ToolResponse> {
 }
 
 async function handleProjectMemory(args: ProjectMemoryArguments): Promise<ToolResponse> {
-  indexProjectInBackground(args.project_path);
   return textResponse(await runProjectMemoryTool(args));
 }
 
 async function handleGetContext(args: GetContextArguments): Promise<ToolResponse> {
-  indexProjectInBackground(args.project_path);
   return textResponse(await runGetContextTool(args));
 }
 
@@ -557,7 +555,7 @@ export function createServer(): Server {
   const server = new Server(
     {
       name: "infimium",
-      version: "0.5.9"
+      version: "0.5.10"
     },
     {
       capabilities: {
@@ -587,6 +585,10 @@ export function createServer(): Server {
 
     if (tool.name === "hello_infimium") {
       return textResponse("hey-dude");
+    }
+
+    if (tool.name === "infimium_update") {
+      return textResponse(await runInfimiumUpdateTool(parsedArgs as InfimiumUpdateArgs));
     }
 
     if (tool.name === "web_search") {
@@ -642,6 +644,13 @@ export async function startServer(): Promise<void> {
   const config = loadConfig({ requireSearchApiKey: false });
 
   await server.connect(transport);
+
+  const memoryUpdates = startMemoryUpdateWorker({ onError: (message) => console.error(message) });
+  const previousOnClose = server.onclose;
+  server.onclose = () => {
+    previousOnClose?.();
+    void memoryUpdates.stop();
+  };
 
   let contextLayer: ReturnType<typeof startContextLayerAutoWriter> | null = null;
   try {

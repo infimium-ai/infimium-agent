@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.10
+
+- Added `infimium update` and the `infimium_update` MCP tool for manual memory checkpoints and opt-in automatic updates.
+- Persisted project-scoped update settings and episodic graphs linking tasks, files, and handoff notes.
+- Made `get_context` read saved context by default without a repository rescan. Use `--refresh` or `infimium update` to refresh filesystem context.
+- Removed implicit reindexing from MCP retrieval calls; use indexing commands or the existing auto-index watcher to update the index.
+- Added memory-first handoff guidance and tests for project isolation, scheduling, deduplication, and CLI/MCP access.
+
 ## 0.5.3
 
 ### Bug Fixes

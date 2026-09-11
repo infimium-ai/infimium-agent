@@ -7,7 +7,7 @@ import { dataPath } from "../paths.js";
 
 const require = createRequire(import.meta.url);
 const DEFAULT_MEMORY_LIMIT = 8;
-const CURRENT_MEMORY_SCHEMA_VERSION = 1;
+const CURRENT_MEMORY_SCHEMA_VERSION = 2;
 
 type Database = import("node:sqlite").DatabaseSync;
 type StatementSync = import("node:sqlite").StatementSync;
@@ -142,6 +142,27 @@ export type MemorySearchResult = {
   title: string;
   summary: string;
   createdAt: number;
+};
+
+export type MemoryCheckpoint = {
+  id: string;
+  previousId: string | null;
+  projectPath: string;
+  summary: string;
+  task: string | null;
+  handoff: string | null;
+  files: string[];
+  fingerprint: string;
+  createdAt: number;
+  source: "manual" | "automatic";
+};
+
+export type MemoryUpdateSettings = {
+  projectPath: string;
+  enabled: boolean;
+  intervalMs: number;
+  nextRunAt: number;
+  lastError: string | null;
 };
 
 type EventRow = {
@@ -615,6 +636,64 @@ export class ProjectMemoryStore {
     this.db.close();
   }
 
+  getMemoryCheckpoints(projectPath: string, limit = 5): MemoryCheckpoint[] {
+    return (this.db.prepare(
+      "SELECT payload FROM memory_checkpoints WHERE project_path = ? ORDER BY rowid DESC LIMIT ?"
+    ).all(resolve(projectPath), Math.min(50, Math.max(1, limit))) as Array<{ payload: string }>)
+      .map((row) => JSON.parse(row.payload) as MemoryCheckpoint);
+  }
+
+  saveMemoryCheckpoint(input: Omit<MemoryCheckpoint, "id" | "previousId">): MemoryCheckpoint | null {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = this.getMemoryCheckpoints(input.projectPath, 1)[0];
+      if (previous?.fingerprint === input.fingerprint) {
+        this.db.exec("COMMIT");
+        return null;
+      }
+      const checkpoint: MemoryCheckpoint = {
+        ...input, projectPath: resolve(input.projectPath), id: randomUUID(), previousId: previous?.id ?? null
+      };
+      this.db.prepare("INSERT INTO memory_checkpoints (id, project_path, payload) VALUES (?, ?, ?)")
+        .run(checkpoint.id, checkpoint.projectPath, JSON.stringify(checkpoint));
+      this.db.exec("COMMIT");
+      return checkpoint;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  configureMemoryUpdates(projectPath: string, enabled: boolean, intervalMs = 300_000): void {
+    if (!Number.isInteger(intervalMs) || intervalMs < 10_000 || intervalMs > 86_400_000) {
+      throw new Error("Memory update interval must be between 10 and 86400 seconds");
+    }
+    this.db.prepare(`INSERT INTO memory_update_settings
+      (project_path, enabled, interval_ms, next_run_at, last_error) VALUES (?, ?, ?, ?, NULL)
+      ON CONFLICT(project_path) DO UPDATE SET enabled=excluded.enabled,
+      interval_ms=excluded.interval_ms, next_run_at=excluded.next_run_at, last_error=NULL`)
+      .run(resolve(projectPath), enabled ? 1 : 0, intervalMs, Date.now() + intervalMs);
+  }
+
+  getMemoryUpdateSettings(): MemoryUpdateSettings[] {
+    return (this.db.prepare("SELECT * FROM memory_update_settings").all() as SqliteRow[]).map((row) => ({
+      projectPath: String(row.project_path), enabled: row.enabled === 1,
+      intervalMs: Number(row.interval_ms), nextRunAt: Number(row.next_run_at),
+      lastError: readString(row.last_error)
+    }));
+  }
+
+  claimMemoryUpdate(projectPath: string, now: number): boolean {
+    return this.db.prepare(`UPDATE memory_update_settings SET next_run_at = ? + interval_ms
+      WHERE project_path = ? AND enabled = 1 AND next_run_at <= ?`)
+      .run(now, resolve(projectPath), now).changes === 1;
+  }
+
+  setMemoryUpdateError(projectPath: string, error: string | null): void {
+    this.db.prepare("UPDATE memory_update_settings SET last_error = ? WHERE project_path = ?")
+      .run(error, resolve(projectPath));
+  }
+
   private getOrStartSession(projectPath: string, task: string | null, startedAt: number): MemorySession {
     return this.getActiveSession(projectPath) ?? this.startSession(projectPath, task, startedAt);
   }
@@ -690,6 +769,14 @@ export class ProjectMemoryStore {
 
   private ensureSchema(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_checkpoints (
+        id TEXT PRIMARY KEY, project_path TEXT NOT NULL, payload TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_checkpoints_project ON memory_checkpoints(project_path);
+      CREATE TABLE IF NOT EXISTS memory_update_settings (
+        project_path TEXT PRIMARY KEY, enabled INTEGER NOT NULL,
+        interval_ms INTEGER NOT NULL, next_run_at INTEGER NOT NULL, last_error TEXT
+      );
       CREATE TABLE IF NOT EXISTS schema_migrations (
         name TEXT PRIMARY KEY,
         version INTEGER NOT NULL,
