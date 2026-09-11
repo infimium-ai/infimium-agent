@@ -9,6 +9,8 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { readInfimiumStatus } from "../cli/status-cmd.js";
 import { createProjectFilePolicy } from "../indexer/project-files.js";
 import { dataPath } from "../paths.js";
+import { MEMORY_HANDOFF_POLICY } from "./handoff-policy.js";
+import { buildMemoryGraph } from "./memory-graph.js";
 import {
   ProjectMemoryStore,
   type ProjectMemoryEvent,
@@ -114,6 +116,7 @@ export type ContextLayerSnapshot = {
     indexHealth: (IndexSummary & { status: "fresh" | "stale" | "missing" }) | null;
   };
   activeExecution: {
+    memoryGraph?: ReturnType<typeof buildMemoryGraph>;
     currentTask: string | null;
     lastNote: string | null;
     lastPlanPath: string | null;
@@ -183,6 +186,11 @@ export class ContextLayerWriter {
 
   async refresh(): Promise<ContextLayerSnapshot> {
     const snapshot = await this.buildSnapshot();
+    return this.saveSnapshot(snapshot);
+  }
+
+  async saveSnapshot(snapshot: ContextLayerSnapshot): Promise<ContextLayerSnapshot> {
+    this.refreshMemoryFields(snapshot);
     const snapshotText = serializeSnapshot(snapshot, "yaml");
 
     await mkdir(dirname(this.filePath), { recursive: true });
@@ -210,7 +218,7 @@ export class ContextLayerWriter {
   }
 
   async getContext(
-    refresh: boolean = true,
+    refresh: boolean = false,
     format: ContextOutputFormat = "yaml"
   ): Promise<string> {
     if (refresh) {
@@ -221,11 +229,38 @@ export class ContextLayerWriter {
     if (cached) {
       const snapshot = parseCachedSnapshot(cached.snapshotText);
       if (snapshot) {
+        if (isCurrentSnapshot(snapshot)) this.refreshMemoryFields(snapshot);
         return serializeSnapshot(snapshot, format);
       }
     }
 
-    return serializeSnapshot(await this.refresh(), format);
+    const missing = {
+      status: "missing",
+      projectPath: this.projectPath,
+      message: "No stored context. Ask the user before refreshing with infimium_update or get_context refresh=true.",
+      guidance: MEMORY_HANDOFF_POLICY
+    };
+    return format === "json" ? JSON.stringify(missing, null, 2) : stringifyYaml(missing);
+  }
+
+  private refreshMemoryFields(snapshot: ContextLayerSnapshot): void {
+    const memory = this.memoryStore.getResumeContext(this.projectPath, this.limit);
+    const checkpoints = this.memoryStore.getMemoryCheckpoints(this.projectPath, 3);
+    snapshot.activeExecution.currentTask = memory.state.currentTask;
+    snapshot.activeExecution.lastNote = memory.state.lastNote;
+    snapshot.activeExecution.lastPlanPath = memory.state.lastPlanPath;
+    snapshot.activeExecution.semanticLedger = memory.semanticLedger.map(({ category, key, value }) => ({ category, key, value }));
+    snapshot.activeExecution.recentMilestones = memory.recentArchives.map((entry) => ({
+      milestone: entry.milestone, summary: entry.summary, completedAt: new Date(entry.completedAt).toISOString()
+    }));
+    snapshot.activeExecution.activeScratchpad = memory.activeScratchpad.slice(-5).map((event) => ({
+      type: event.eventType, summary: event.summary, createdAt: new Date(event.createdAt).toISOString()
+    }));
+    snapshot.activeExecution.memoryGraph = buildMemoryGraph(checkpoints);
+    snapshot.activeExecution.agentHandoff = buildAgentHandoff(
+      memory.state.currentTask, snapshot.dynamicState.recentActivity, snapshot.dynamicState.indexHealth?.status ?? "missing"
+    );
+    snapshot.staticAnchors.retrieval.guidance = MEMORY_HANDOFF_POLICY;
   }
 
   close(): void {
@@ -344,19 +379,16 @@ function buildAgentHandoff(
   recentActivity: RecentActivitySummary,
   indexStatus: "fresh" | "stale" | "missing"
 ): ContextLayerSnapshot["activeExecution"]["agentHandoff"] {
-  const activeFiles = recentActivity.files.slice(0, 3).map((file) => file.path);
-  const task = currentTask ? `Continue the active task: ${currentTask}.` : "Confirm the next task before editing.";
-  const files = activeFiles.length > 0
-    ? ` Inspect ${activeFiles.join(", ")} first because they changed most recently.`
-    : "";
+  const task = currentTask ? ` Recorded task: ${currentTask}.` : " No active task recorded.";
   const index = indexStatus === "fresh"
-    ? " Use semantic_code_search before expanding implementation details."
-    : " Run infimium index before relying on semantic retrieval.";
+    ? " Stored index was fresh at snapshot time."
+    : " Stored index is missing or stale; disclose this before relying on retrieval.";
   return {
-    instruction: `${task}${files}${index}`,
+    instruction: `${MEMORY_HANDOFF_POLICY}${task}${index}`,
     preferredTools: [
       "get_context",
       "project_memory",
+      "infimium_update",
       "semantic_code_search",
       "dep_graph",
       "query_local_docs",
@@ -408,7 +440,7 @@ export async function readContextLayer(options: ContextLayerOptions & {
   let writer: ContextLayerWriter | null = null;
   try {
     writer = new ContextLayerWriter(options);
-    return await writer.getContext(options.refresh ?? true, options.format ?? "yaml");
+    return await writer.getContext(options.refresh ?? false, options.format ?? "yaml");
   } catch (error: unknown) {
     const cached = await readCachedContextLayer(options);
     if (cached !== null) {
@@ -679,6 +711,13 @@ function serializeSnapshot(
     lineWidth: 0,
     indent: 2
   });
+}
+
+function isCurrentSnapshot(value: unknown): value is ContextLayerSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<ContextLayerSnapshot>;
+  return snapshot.schemaVersion === 4 && !!snapshot.activeExecution &&
+    !!snapshot.dynamicState?.recentActivity && !!snapshot.staticAnchors?.retrieval;
 }
 
 function parseCachedSnapshot(value: string): unknown | null {

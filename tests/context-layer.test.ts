@@ -126,6 +126,7 @@ describe("context layer", () => {
         projectPath,
         filePath: contextFilePath,
         format: "json",
+        refresh: true,
         memoryStore
       });
       expect(JSON.parse(context)).toMatchObject({

@@ -21,6 +21,7 @@ import { runPlanCommand } from "./commands/plan.js";
 import { runSearchCommand } from "./commands/search.js";
 import { runSetupCommand } from "./commands/setup.js";
 import { runWorkspaceCommand } from "./commands/workspace.js";
+import { runInfimiumUpdateCommand } from "./commands/infimium-update.js";
 import { startServer } from "./server.js";
 import { protectStdioStdout } from "./stdio.js";
 import { runTelemetryCommand } from "./telemetry.js";
@@ -45,6 +46,7 @@ Commands:
   get-context     Output the full flattened context (layer.md)
   remember        Add a milestone or note to project memory
   memory          Manage project memory (reset, inspect)
+  update          Refresh memory or start/stop/status automatic memory updates
   plan            Draft an implementation plan based on a prompt
   serve           (Default) Start the MCP server via stdio
 
@@ -140,6 +142,11 @@ Options:
 
   if (command === "remember") {
     await runRememberCommand(args);
+    return;
+  }
+
+  if (command === "update" || command === "infimium-update" || command === "infimium_update") {
+    await runInfimiumUpdateCommand(args);
     return;
   }
 

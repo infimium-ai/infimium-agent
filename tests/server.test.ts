@@ -17,6 +17,7 @@ import { ProjectMemoryStore } from "../src/memory/project-memory.js";
 import { createProjectId } from "../src/memory/project-overview.js";
 
 const expectedToolNames = [
+  "infimium_update",
   "hello_infimium",
   "web_search",
   "fetch_url",
@@ -41,6 +42,7 @@ const validToolInputs: Record<
   (typeof expectedToolNames)[number],
   Record<string, unknown>
 > = {
+  infimium_update: { action: "status" },
   hello_infimium: {},
   web_search: { query: "infimium", max_results: 1 },
   fetch_url: { url: "data:text/html,<main>Hello from Infimium</main>", extract: "markdown" },
@@ -72,7 +74,9 @@ describe("Infimium MCP server", () => {
       env: {
         ...(tmpDir ? { TMPDIR: tmpDir } : {}),
         INFIMIUM_DATA_DIR: serverDataDir,
-        SEARCH_API_KEY: "test-key",
+        SEARCH_API_KEY: "",
+        INFIMIUM_AUTO_INDEX: "false",
+        INFIMIUM_TELEMETRY: "false",
         SHELL_ALLOWLIST: "ls,sleep"
       }
     });
@@ -85,14 +89,14 @@ describe("Infimium MCP server", () => {
     rmSync(serverDataDir, { recursive: true, force: true });
   });
 
-  it("lists exactly the eleven Infimium tools", async () => {
+  it("lists all Infimium tools including memory updates", async () => {
     const response = await client.listTools(undefined, { timeout: 2_000 });
     const toolNames = response.tools.map((tool) => tool.name).sort();
 
     expect(toolNames).toEqual([...expectedToolNames].sort());
   });
 
-  it("returns text content from every stub tool", async () => {
+  it("returns text content from every tool without external search credentials", async () => {
     for (const name of expectedToolNames) {
       const rawResponse = await client.callTool(
         {
@@ -123,6 +127,30 @@ describe("Infimium MCP server", () => {
       type: "text",
       text: "hey-dude"
     });
+  });
+
+  it("updates project memory through MCP and returns its handoff without a refresh", async () => {
+    const project = join(serverDataDir, "memory-project");
+    mkdirSync(project);
+    writeFileSync(join(project, "package.json"), JSON.stringify({ name: "memory-mcp-check" }));
+    const updated = CallToolResultSchema.parse(await client.callTool({
+      name: "infimium_update",
+      arguments: { project_path: project, note: "Verified MCP checkpoint", task: "Check handoff", handoff: "Review the saved checkpoint" }
+    }));
+    expect(updated.isError).not.toBe(true);
+    expect(JSON.stringify(updated.content)).toContain("updated: true");
+    const context = CallToolResultSchema.parse(await client.callTool({
+      name: "get_context", arguments: { project_path: project }
+    }));
+    expect(JSON.stringify(context.content)).toContain("Review the saved checkpoint");
+    expect(JSON.stringify(context.content)).toContain("Do not rescan");
+    for (const action of ["start", "status", "stop"] as const) {
+      const result = CallToolResultSchema.parse(await client.callTool({
+        name: "infimium_update", arguments: { project_path: project, action }
+      }));
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(result.content)).toContain(`enabled: ${action !== "stop"}`);
+    }
   });
 });
 

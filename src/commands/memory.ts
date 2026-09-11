@@ -155,7 +155,7 @@ export async function runGetContextTool(args: {
   return readContextLayer({
     projectPath: resolveMemoryProjectPath(args.project_path, true),
     limit: args.limit ?? 8,
-    refresh: args.refresh ?? true,
+    refresh: args.refresh ?? false,
     format: args.format ?? "yaml"
   });
 }
@@ -286,7 +286,7 @@ export function resolveMemoryProjectPath(
 }
 
 function parseGetContextArgs(args: string[]): GetContextArgs {
-  let refresh = true;
+  let refresh = false;
   let limit = 8;
   let format: ContextOutputFormat = "yaml";
   let projectPath: string | undefined;

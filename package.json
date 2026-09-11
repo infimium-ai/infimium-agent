@@ -1,6 +1,6 @@
 {
   "name": "infimium",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "description": "Private context layer MCP for AI agents.",
   "private": false,
   "mcpName": "io.github.aryankumar06/infimium",
