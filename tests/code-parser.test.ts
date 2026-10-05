@@ -61,4 +61,21 @@ describe("CodeParser", () => {
     expect(() => parser.parseFile(join(fixturesPath, "malformed.ts"))).not.toThrow();
     expect(parser.parseFile(join(fixturesPath, "malformed.ts"))).toEqual([]);
   });
+
+  it("parses C# classes, interfaces, structs, constructors, and methods", async () => {
+    const symbols = await parser.parseFileAsync(join(fixturesPath, "sample.cs"));
+
+    expect(symbols.map((symbol) => [symbol.name, symbol.type])).toEqual([
+      ["IUserService", "class"],
+      ["GetUser", "method"],
+      ["UserService", "class"],
+      ["UserService", "method"],
+      ["GetUser", "method"],
+      ["SaveUser", "method"],
+      ["GetCount", "method"],
+      ["User", "class"]
+    ]);
+
+    expect(symbols.every((symbol) => symbol.language === "csharp")).toBe(true);
+  });
 });
