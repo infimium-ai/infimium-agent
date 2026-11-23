@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.12
+
+- Reconciled C# dynamic grammar loading and language definitions with upstream `main`.
+- Bumped MCP server package metadata in `server.json` to 0.5.12.
+
 ## 0.5.11
 
 - Added immediate initial evaluation on `infimium update start` so background memory syncing runs at launch without waiting for the initial interval timer.
