@@ -96,7 +96,7 @@ export class CodeParser {
       return this.parseFile(filePath);
     }
 
-    // Go, Rust, Java: always use WASM parser (no native bindings bundled)
+    // Go, Rust, Java, C#: always use WASM parser (no native bindings bundled)
     if (isWasmOnlyLanguage(language)) {
       try {
         const source = readFileSync(filePath, "utf8");
@@ -272,6 +272,26 @@ function dynamicSymbolType(
     if (node.type === "class_declaration") return "class";
     if (node.type === "method_definition") return "method";
     if (node.type === "arrow_function") return "arrow_function";
+  }
+  if (language === "csharp") {
+    if (
+      [
+        "class_declaration",
+        "interface_declaration",
+        "struct_declaration",
+        "enum_declaration",
+        "record_declaration"
+      ].includes(node.type)
+    ) {
+      return "class";
+    }
+
+    if (
+      node.type === "method_declaration" ||
+      node.type === "constructor_declaration"
+    ) {
+      return "method";
+    }
   }
 
   return null;

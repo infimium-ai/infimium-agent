@@ -85,6 +85,40 @@ describe("LocalDocsSearch", () => {
     expect(output).toContain("Other file");
   });
 
+  it("retries transient Ollama embedding failures before querying docs", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValueOnce(embeddingResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const collection = {
+      count: vi.fn().mockResolvedValue(1),
+      query: vi.fn().mockResolvedValue({
+        documents: [["Recovery guidance"]],
+        metadatas: [[{ filePath: "/docs/recovery.md", chunkIndex: 1 }]],
+        distances: [[0.1]]
+      })
+    };
+
+    const output = await runQueryLocalDocs(
+      {
+        localDocsPath: "/docs",
+        vectorClient: fakeClient(collection),
+        retryConfig: {
+          maxAttempts: 2,
+          initialDelayMs: 0,
+          maxDelayMs: 0,
+          backoffMultiplier: 1
+        }
+      },
+      "recovery",
+      1
+    );
+
+    expect(output).toContain("Recovery guidance");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(collection.query).toHaveBeenCalledOnce();
+  });
+
   it("returns the empty collection message", async () => {
     const collection = {
       count: vi.fn().mockResolvedValue(0),
