@@ -392,6 +392,15 @@ activeExecution:
       "BrandApp",
       "UserApp"
     ]);
+
+    const standalonePath = await createProject();
+    const standalone = readPlaygroundScope(standalonePath);
+    expect(standalone.activeProjectPath).toBe(await realpath(standalonePath));
+    expect(standalone.activeWorkspaceId).toBeNull();
+    expect(standalone.projects.find(project => project.active)?.path).toBe(await realpath(standalonePath));
+    expect(standalone.workspaces.every(workspace => !workspace.active)).toBe(true);
+    expect(readPlaygroundSymbols(standalonePath).total).toBe(0);
+    expect(readPlaygroundLogs(standalonePath).items).toEqual([]);
   });
 });
 

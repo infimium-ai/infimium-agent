@@ -116,6 +116,7 @@ export type ContextLayerSnapshot = {
     indexHealth: (IndexSummary & { status: "fresh" | "stale" | "missing" }) | null;
   };
   activeExecution: {
+    roadmapHandoffs?: ReturnType<ProjectMemoryStore["getAgentHandoffs"]>;
     memoryGraph?: ReturnType<typeof buildMemoryGraph>;
     currentTask: string | null;
     lastNote: string | null;
@@ -236,6 +237,7 @@ export class ContextLayerWriter {
 
     const missing = {
       status: "missing",
+      roadmapHandoffs: this.memoryStore.getAgentHandoffs(this.projectPath),
       projectPath: this.projectPath,
       message: "No stored context. Ask the user before refreshing with infimium_update or get_context refresh=true.",
       guidance: MEMORY_HANDOFF_POLICY
@@ -244,6 +246,7 @@ export class ContextLayerWriter {
   }
 
   private refreshMemoryFields(snapshot: ContextLayerSnapshot): void {
+    snapshot.activeExecution.roadmapHandoffs = this.memoryStore.getAgentHandoffs(this.projectPath);
     const memory = this.memoryStore.getResumeContext(this.projectPath, this.limit);
     const checkpoints = this.memoryStore.getMemoryCheckpoints(this.projectPath, 3);
     snapshot.activeExecution.currentTask = memory.state.currentTask;
