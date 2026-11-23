@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import {
   Activity,
   ArrowRight,
@@ -23,6 +23,51 @@ import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 
 type ViewId = "pulse" | "memory" | "graph" | "index" | "economics";
 type ThemeMode = "dark" | "light";
+type ApiContextValue = {
+  base: string;
+  token: string;
+};
+
+const ApiContext = createContext<ApiContextValue>({ base: "/api", token: "" });
+
+// The private shell supplies authentication; the public Playground keeps its defaults.
+export function EmbeddedPlayground({
+  view,
+  projectPath,
+  theme,
+  token
+}: {
+  view: ViewId;
+  projectPath: string;
+  theme: ThemeMode;
+  token: string;
+}) {
+  return (
+    <ApiContext.Provider value={{ base: "/api/observability", token }}>
+      <EmbeddedView key={`${projectPath}:${view}`} view={view} projectPath={projectPath} theme={theme} />
+    </ApiContext.Provider>
+  );
+}
+
+function EmbeddedView({
+  view,
+  projectPath,
+  theme
+}: {
+  view: ViewId;
+  projectPath: string;
+  theme: ThemeMode;
+}) {
+  const scope = useApi<PlaygroundScope>(withProject("/api/scope", projectPath));
+  if (view === "pulse") return <PulseView projectPath={projectPath} />;
+  if (view === "memory") return <MemoryView projectPath={projectPath} />;
+  if (view === "graph") return <GraphView projectPath={projectPath} theme={theme} />;
+  if (view === "economics") return <EconomicsView projectPath={projectPath} />;
+  if (!scope.data) {
+    return scope.error ? <ErrorPanel message={scope.error} /> : <LoadingPanel label="Reading project scope" />;
+  }
+  return <IndexView projectPath={projectPath} scopeData={scope.data} />;
+}
 type RetrievalStrategy = "Full Implementation Text" | "Semantic Chunks" | "Infimium AST Skeletons";
 
 type NavigationItem = {
@@ -209,7 +254,8 @@ function readInitialTheme(): ThemeMode {
 
 function cssVariable(name: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
-  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const surface = document.querySelector('[data-observability-root]') ?? document.documentElement;
+  const value = window.getComputedStyle(surface).getPropertyValue(name).trim();
   return value || fallback;
 }
 
@@ -1421,16 +1467,22 @@ function useApi<T>(
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { base, token } = useContext(ApiContext);
 
   useEffect(() => {
     const controller = new AbortController();
-    const load = () => {
-      fetch(path, { signal: controller.signal })
+    let inFlight = false;
+    const load = (background = false) => {
+      if (inFlight || (background && document.hidden) || controller.signal.aborted) return;
+      inFlight = true;
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+      fetch(path.replace(/^\/api(?=\/)/, base), { signal: controller.signal, ...(headers ? { headers } : {}) })
         .then(async (response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json() as Promise<T>;
         })
         .then((value) => {
+          if (controller.signal.aborted) return;
           setData(value);
           setError(null);
         })
@@ -1439,17 +1491,19 @@ function useApi<T>(
           setError(caught instanceof Error ? caught.message : String(caught));
         })
         .finally(() => {
+          inFlight = false;
           if (!controller.signal.aborted) setLoading(false);
         });
     };
     setLoading(true);
     load();
-    const interval = refreshMs ? window.setInterval(load, refreshMs) : null;
+    const intervalMs = refreshMs ?? (base === "/api" ? undefined : 5000);
+    const interval = intervalMs ? window.setInterval(() => load(true), intervalMs) : null;
     return () => {
       controller.abort();
       if (interval !== null) window.clearInterval(interval);
     };
-  }, [path, refreshMs]);
+  }, [path, refreshMs, base, token]);
 
   return { data, loading, error };
 }

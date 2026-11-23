@@ -43,6 +43,8 @@ describe("project memory updates", () => {
     expect(second.checkpoint?.previousId).toBe(first.checkpoint?.id);
     expect(second.checkpoint?.handoff).toBe("Run auth tests");
     expect(store.getActiveSession(project)?.status).toBe("active");
+    expect(store.getResumeContext(project).state.updatedAt).toBe(second.checkpoint?.createdAt);
+    expect(store.getResumeContext(project).activeScratchpad.some((e) => e.summary.includes("Auto-detected changes"))).toBe(true);
     const context = parse(await readContextLayer({ projectPath: project, memoryStore: store }));
     expect(context.activeExecution.memoryGraph.edges.map((edge: { relation: string }) => edge.relation))
       .toEqual(expect.arrayContaining(["followed_by", "records", "involves", "hands_off"]));

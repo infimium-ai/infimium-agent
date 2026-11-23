@@ -13,6 +13,19 @@ type Database = import("node:sqlite").DatabaseSync;
 type StatementSync = import("node:sqlite").StatementSync;
 type SqliteRow = Record<string, unknown>;
 
+export type AgentHandoffReference = {
+  id: string;
+  revision: number;
+  title: string;
+  stage?: "draft-review-required" | "agent-handoff";
+  taskId: string | null;
+  reportedComplete: number;
+  totalTasks: number;
+  verification: string;
+  reviewState: string;
+  retrieval: string;
+};
+
 export type ProjectMemoryEventType =
   | "note"
   | "progress"
@@ -123,6 +136,7 @@ export type RememberInput = {
   currentTask?: string | null;
   lastPlanPath?: string | null;
   createdAt?: number;
+  activateProject?: boolean;
 };
 
 export type CompleteSessionInput = {
@@ -188,7 +202,7 @@ export class ProjectMemoryStore {
 
   constructor(
     dbPath: string = dataPath("infimium.db"),
-    options: { readOnly?: boolean } = {}
+    options: { readOnly?: boolean; busyTimeoutMs?: number } = {}
   ) {
     const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
     const resolvedDbPath = resolve(dbPath);
@@ -197,10 +211,20 @@ export class ProjectMemoryStore {
     }
     this.dbPath = resolvedDbPath;
     this.db = new DatabaseSync(resolvedDbPath, { readOnly: options.readOnly ?? false });
-    this.db.exec("PRAGMA busy_timeout = 30000;");
-    if (!options.readOnly) {
-      this.db.exec("PRAGMA journal_mode = WAL;");
-      this.ensureSchema();
+    const timeout = options.busyTimeoutMs ?? 30000;
+    if (!Number.isInteger(timeout) || timeout < 0 || timeout > 30000) {
+      this.db.close();
+      throw new Error("Memory busy timeout must be an integer between 0 and 30000ms");
+    }
+    try {
+      this.db.exec(`PRAGMA busy_timeout = ${timeout};`);
+      if (!options.readOnly) {
+        this.db.exec("PRAGMA journal_mode = WAL;");
+        this.ensureSchema();
+      }
+    } catch (error) {
+      this.db.close();
+      throw error;
     }
   }
 
@@ -251,7 +275,7 @@ export class ProjectMemoryStore {
       activeSessionId,
       updatedAt: createdAt
     });
-    this.setActiveProjectPath(projectPath, createdAt);
+    if (input.activateProject !== false) this.setActiveProjectPath(projectPath, createdAt);
 
     return { projectPath, eventType, summary, details, createdAt };
   }
@@ -585,6 +609,61 @@ export class ProjectMemoryStore {
     }
   }
 
+  saveAgentHandoff(projectPath: string, reference: AgentHandoffReference): void {
+    const payload = JSON.stringify(reference);
+    if (
+      !reference.id ||
+      reference.id.length > 100 ||
+      !Number.isSafeInteger(reference.revision) ||
+      reference.revision < 1 ||
+      payload.length > 4000
+    ) {
+      throw new Error("Invalid or oversized handoff reference.");
+    }
+    this.db
+      .prepare(
+        `INSERT INTO agent_handoff_references(project_path, id, revision, payload, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(project_path, id) DO UPDATE SET
+          revision = excluded.revision,
+          payload = excluded.payload,
+          updated_at = excluded.updated_at
+         WHERE excluded.revision > agent_handoff_references.revision`
+      )
+      .run(resolve(projectPath), reference.id, reference.revision, payload, Date.now());
+  }
+
+  removeAgentHandoff(projectPath: string, id: string): void {
+    this.db
+      .prepare("DELETE FROM agent_handoff_references WHERE project_path = ? AND id = ?")
+      .run(resolve(projectPath), id);
+  }
+
+  getAgentHandoffs(projectPath: string): AgentHandoffReference[] {
+    const table = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_handoff_references'")
+      .get();
+    if (!table) return [];
+
+    const rows = this.db
+      .prepare(
+        `SELECT payload
+         FROM agent_handoff_references
+         WHERE project_path = ?
+         ORDER BY updated_at DESC, id
+         LIMIT 5`
+      )
+      .all(resolve(projectPath)) as SqliteRow[];
+
+    return rows.flatMap((row) => {
+      try {
+        return [JSON.parse(String(row.payload)) as AgentHandoffReference];
+      } catch {
+        return [];
+      }
+    });
+  }
+
   getLatestContextSnapshot(projectPath: string = process.cwd()): ProjectContextSnapshotRecord | null {
     const row = this.db
       .prepare(
@@ -672,7 +751,7 @@ export class ProjectMemoryStore {
       (project_path, enabled, interval_ms, next_run_at, last_error) VALUES (?, ?, ?, ?, NULL)
       ON CONFLICT(project_path) DO UPDATE SET enabled=excluded.enabled,
       interval_ms=excluded.interval_ms, next_run_at=excluded.next_run_at, last_error=NULL`)
-      .run(resolve(projectPath), enabled ? 1 : 0, intervalMs, Date.now() + intervalMs);
+      .run(resolve(projectPath), enabled ? 1 : 0, intervalMs, enabled ? Date.now() : Date.now() + intervalMs);
   }
 
   getMemoryUpdateSettings(): MemoryUpdateSettings[] {
@@ -769,6 +848,10 @@ export class ProjectMemoryStore {
 
   private ensureSchema(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_handoff_references (
+        project_path TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
+        payload TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(project_path,id)
+      );
       CREATE TABLE IF NOT EXISTS memory_checkpoints (
         id TEXT PRIMARY KEY, project_path TEXT NOT NULL, payload TEXT NOT NULL
       );

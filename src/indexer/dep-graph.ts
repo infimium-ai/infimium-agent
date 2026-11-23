@@ -301,7 +301,7 @@ export class DepGraphBuilder {
   }
 }
 
-function extractSymbolCalls(symbols: CodeSymbol[]): SymbolCallRecord[] {
+export function extractSymbolCalls(symbols: CodeSymbol[]): SymbolCallRecord[] {
   const edges: SymbolCallRecord[] = [];
   const callPattern = /\b([A-Za-z_$][\w$]*)\s*\(/g;
 
@@ -350,7 +350,7 @@ function uniqueCalls(edges: SymbolCallRecord[]): SymbolCallRecord[] {
   });
 }
 
-function extractHttpRoutes(
+export function extractHttpRoutes(
   source: string,
   filePath: string,
   symbols: CodeSymbol[]
@@ -501,7 +501,7 @@ async function findCodeFiles(rootPath: string): Promise<string[]> {
   return filterProjectFiles(matches, policy);
 }
 
-async function extractImportsAsync(filePath: string, dynamicGrammars: DynamicGrammarLoader): Promise<string[]> {
+export async function extractImportsAsync(filePath: string, dynamicGrammars: DynamicGrammarLoader): Promise<string[]> {
   const language = detectLanguage(filePath);
   if (!language) {
     return [];
@@ -700,7 +700,7 @@ function readName(node: SyntaxNode | null): string | null {
   return node?.text ?? null;
 }
 
-function resolveImport(
+export function resolveImport(
   sourceFile: string,
   importPath: string,
   dartPackageRoots: Map<string, string>
@@ -755,7 +755,7 @@ function unquote(value: string): string {
   return value.replace(/^r?["']|["']$/g, "");
 }
 
-function readDartPackageRoots(rootPath: string): Map<string, string> {
+export function readDartPackageRoots(rootPath: string): Map<string, string> {
   const workspace = loadWorkspaceForProject(rootPath);
   const projectPaths = workspace?.projects.map((project) => project.path) ?? [rootPath];
   const packageRoots = new Map<string, string>();

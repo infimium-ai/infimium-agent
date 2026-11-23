@@ -62,8 +62,21 @@ export async function runInfimiumUpdateCommand(args: string[]): Promise<void> {
   }
   console.log((await runInfimiumUpdateTool(input)).trimEnd());
   if (input.action !== "start") return;
-  const worker = startMemoryUpdateWorker({ projectPath: resolveMemoryProjectPath(input.project_path), onError: console.error });
+  const projectPath = resolveMemoryProjectPath(input.project_path);
+  const worker = startMemoryUpdateWorker({
+    projectPath,
+    onUpdate: ({ updated, summary }) => {
+      const time = new Date().toLocaleTimeString();
+      if (updated) {
+        console.log(`[${time}] Memory updated: ${summary}`);
+      } else {
+        console.log(`[${time}] Workspace clean: No new changes detected.`);
+      }
+    },
+    onError: console.error
+  });
   console.error("Memory auto-update running. Ctrl+C stops this process; use update stop to disable future updates.");
+  await worker.tick();
   await new Promise<void>((resolveDone, reject) => {
     const keepAlive = setInterval(() => undefined, 60_000);
     const stop = () => {

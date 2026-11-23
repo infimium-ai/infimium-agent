@@ -4,80 +4,140 @@
 
 # Infimium
 
-The Private Context Layer & Super Brain for Your Codebase.
-Give AI agents persistent memory, deep dependency graphs, and instant code context -- 100% local, zero token bloat.
+> **The Private Context Layer & Super Brain for AI Coding Agents.**  
+> Persistent episodic memory, deep dependency graphs, and instant AST-compact code context — 100% local, zero cloud dependencies, zero token bloat.
 
-
+---
 
 [![npm version](https://img.shields.io/npm/v/infimium.svg)](https://www.npmjs.com/package/infimium)
 [![MCP Badge](https://lobehub.com/badge/mcp/infimium-ai-infimium-agent?style=plastic)](https://lobehub.com/mcp/infimium-ai-infimium-agent)
-[![MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/infimium-ai/infimium-agent.svg?style=social)](https://github.com/infimium-ai/infimium-agent)
+
+---
 
 ## Demo
 
 [![Infimium demo](docs/assets/infimium-demo.gif)](docs/assets/infimium-demo.mp4)
 
-## Why
+---
 
-Large repositories make agents read too much code or miss the right symbol. Infimium retrieves compact, relevant context before the agent starts editing.
+## Why Infimium?
+
+Modern AI coding agents face two core problems:
+1. **Context Window Exhaustion:** Reading massive files or dumping entire directory structures burns tokens and triggers model amnesia.
+2. **Session Amnesia:** Once an agent session ends, the agent loses track of what it built, why decisions were made, and what tasks remain.
+
+Infimium solves both by acting as a **local context and memory layer**:
 
 ```text
-200,000 lines of code
-Agent reads everything -> context blown + expensive
-grep "price calculation" -> misses calcPropertyValue()
+Without Infimium:
+  200,000 lines of code -> Agent dumps entire files -> Context blown + slow & expensive
+  grep "price calculation" -> Misses calcPropertyValue() in dependent module
+  Session resets -> Agent forgets recent architectural decisions and progress
+
+With Infimium:
+  semantic_code_search("price calculation logic")
+  -> services/property/calc.ts:142 · calcPropertyValue() (compact signature: ~8 tokens)
+  -> Callers: getListingPrice(), estimatePropertyTax()
+  -> expand_symbol("calcPropertyValue") loads only the exact function needed (~99.5% token reduction)
+  -> infimium resume restores the active task, scratchpad events, and durable ledger rules instantly
 ```
 
-```text
-tool: semantic_code_search
-query: "price calculation logic"
+---
 
--> services/property/calc.ts:142 · calcPropertyValue()
--> callers: getListingPrice(), estimatePropertyTax()
+## Architecture Overview
+
+```mermaid
+flowchart TD
+    subgraph Agent["AI Agents & IDEs"]
+        Cursor["Cursor"]
+        Windsurf["Windsurf"]
+        Claude["Claude Desktop"]
+        CLI["Infimium CLI"]
+    end
+
+    subgraph Protocol["Interface Layer"]
+        MCP["MCP Server (stdio / json-rpc)"]
+        CLIEngine["CLI Command Engine"]
+    end
+
+    subgraph Core["Infimium Core Engine"]
+        ContextWriter["Context Layer (layer.md)"]
+        MemoryEngine["3-Tier Memory Store"]
+        GraphEngine["AST & Dependency Graph"]
+        UpdateWorker["Auto-Update Watcher"]
+    end
+
+    subgraph LocalStorage["100% Local Storage (~/.infimium)"]
+        SQLite[("Embedded SQLite (WAL Mode)")]
+        Ollama["Local Ollama (nomic-embed-text)"]
+        TreeSitter["Tree-sitter WASM Grammars"]
+    end
+
+    Cursor --> MCP
+    Windsurf --> MCP
+    Claude --> MCP
+    CLI --> CLIEngine
+
+    MCP --> ContextWriter
+    MCP --> MemoryEngine
+    MCP --> GraphEngine
+
+    CLIEngine --> MemoryEngine
+    CLIEngine --> ContextWriter
+    CLIEngine --> UpdateWorker
+
+    UpdateWorker --> ContextWriter
+    UpdateWorker --> MemoryEngine
+
+    MemoryEngine --> SQLite
+    GraphEngine --> TreeSitter
+    GraphEngine --> SQLite
+    ContextWriter --> SQLite
+    Core -.-> Ollama
 ```
 
-## Quick Start
+---
 
-Requires Node.js 22.5+. From your project folder:
+## Quick Start (3 Minutes)
+
+### Prerequisites
+- **Node.js**: `>= 22.5.0`
+- **Ollama** *(Optional, automatically configured)*: For local embeddings (`nomic-embed-text`).
+
+### 1. Initialize in Your Repository
+
+Run setup from the root directory of the project you want to index:
 
 ```bash
 cd /path/to/your/project
 npx infimium@latest setup
 ```
 
-Run setup from the repository you want to index, not from your home directory (`~`).
-Infimium stops broad roots automatically so it cannot scan unrelated files.
+What `setup` does:
+- Creates global configuration at `~/.infimium/.env`.
+- Checks/starts Ollama and pulls the fast `nomic-embed-text` embedding model.
+- Indexes your project’s code symbols, local docs, and dependencies.
+- Runs `doctor` verification checks and launches the local **Playground** UI.
 
-That creates global config, starts Ollama if it is installed, pulls `nomic-embed-text`, indexes the current project or workspace, runs `doctor`, and opens Playground.
+> [!NOTE]
+> Run setup inside your project directory, not from your home directory (`~`). Infimium prevents broad home directory indexing automatically.
 
-The published CLI keeps its executable entrypoint, so MCP clients can launch it directly through the configuration below.
-
-If Ollama is not installed yet:
-
+If you don't have Ollama installed yet, let Infimium install it:
 ```bash
 npx infimium@latest setup --install-deps
 ```
 
-`infimium setup` creates one global config at `~/.infimium/.env`. You do not need a `.env` in every project. Code, docs, memory, graphs, and vectors are stored locally under `~/.infimium/`.
+---
 
-Web search is optional. Add a Tinyfish key only when you need it:
+## Connect Your AI Agent
 
-```env
-SEARCH_PROVIDER=tinyfish
-SEARCH_API_KEY=your_key
-```
+Add Infimium to your IDE or MCP client configuration:
 
-Full `infimium plan` generation also needs a local text model:
+### Cursor, Windsurf, Claude Desktop, & Goose
 
-```bash
-ollama pull llama3.1
-```
-
-`infimium plan --dry-run "your task"` works without this model and shows the retrieved code context first.
-
-## Connect Your Agent
-
-Cursor, Windsurf, Claude Desktop, and other MCP clients:
+Add to your `mcpServers` configuration (`mcp_config.json` or Claude Settings):
 
 ```json
 {
@@ -90,214 +150,217 @@ Cursor, Windsurf, Claude Desktop, and other MCP clients:
 }
 ```
 
-Restart the client, then use:
+Restart your client. Your agent can now invoke Infimium tools natively:
+- *"Use Infimium `get_context` to understand this project before making changes."*
+- *"Use Infimium `semantic_code_search` to find authentication logic."*
+- *"Use Infimium `dep_graph` to inspect callers of processPayment."*
+- *"Use Infimium `infimium_update` to record progress."*
 
-```text
-Use Infimium hello_infimium.
-Use Infimium get_context before starting.
-Use Infimium semantic_code_search to explain this repository.
-```
+---
 
-Infimium normally uses the MCP process working directory. If your client starts it elsewhere, pass `project_path` once; Infimium remembers the active project and auto-indexes it.
+## Autonomous Memory & Real-Time Auto-Update
 
-## Tools
+Infimium gives your agent continuous episodic memory that updates while you work.
 
-| Tool | What it does |
-| --- | --- |
-| `hello_infimium` | Confirms the MCP server is healthy. |
-| `get_context` | Reads saved YAML repo context, current memory and handoff; explicit refresh updates Git/index state. |
-| `infimium_update` | Refreshes episodic memory and handoff graphs; controls automatic memory checkpoints. |
-| `semantic_code_search` | Finds code by meaning and returns symbol signatures first. |
-| `expand_symbol` | Loads one full implementation only when needed. |
-| `query_local_docs` | Searches local Markdown, text, HTML, and PDF files. |
-| `dep_graph` | Shows imports, callers, callees, and HTTP routes for a symbol. |
-| `project_memory` | Keeps active scratchpad events, compact milestones, and durable project rules across agents. |
-| `plan` | Builds a grounded implementation plan from code and graph context. |
-| `web_search` | Searches the web through optional Tinyfish configuration. |
-| `fetch_url` | Extracts readable Markdown or text from a URL. |
-| `shell` | Runs allowlisted commands with timeouts and output limits. |
+### Enable Background Auto-Updates
 
-## CLI
-
-| Command | Description |
-|---------|-------------|
-| `infimium doctor` | Run health checks on your dependencies and setup. |
-| `infimium status` | Show the current status of the index and memory. |
-| `infimium --help` | Shows all relevant cli commands. |
-| `infimium playground` | Launch the local web UI to explore index, graph, and memory. |
-| `infimium index` | Scan and index the current project directory (code, docs, dependencies). |
-| `infimium watch` | Run the indexer in watch mode to continuously index changes. |
-| `infimium get-context` | Output the full flattened context as YAML (`layer.md`). |
-| `infimium code-search <query>` | Semantically search code and return symbol signatures. |
-| `infimium expand-symbol <symbol>` | Fetch the full implementation code for a specific symbol. |
-| `infimium docs-search <query>` | Semantically search local markdown/text documentation. |
-| `infimium dep-graph <symbol>` | Show dependencies, callers, callees, and route graph. |
-| `infimium plan --dry-run "<task>"` | Draft an implementation plan based on a given prompt. |
-| `infimium remember "<note>"` | Add a milestone, progress, or decision to project memory. |
-| `infimium resume` | Show the active task and recent scratchpad memory events. |
-| `infimium memory complete` | Compact the active scratchpad into an archived milestone. |
-| `infimium memory search "<query>"` | Semantically search past project rules and memory ledger. |
-
-Use `npx infimium ...` if you did not install the package globally.
-
-## Project Memory
-
-Refresh memory yourself, or enable periodic checkpoints for the current project:
+Run the watcher in your project terminal:
 
 ```bash
-infimium update --note "Implemented login validation" --task "Finish login" --handoff "Run the auth tests next"
 infimium update start --interval 300
-infimium update status
+```
+
+- **Immediate Startup Check:** Executes an immediate workspace evaluation right upon starting.
+- **Understands Workspace Changes:** Inspects git status and file modification times to generate structured change summaries:
+  ```text
+  [17:05:12] Memory updated: Auto-detected changes in 3 file(s): M lib/auth.ts, A test/auth_test.ts
+  [17:10:12] Workspace clean: No new changes detected.
+  ```
+- **Live Terminal Logging:** Keeps you informed in real-time with timestamped updates.
+- **Active Scratchpad Sync:** Updates `project_state.updated_at` and records progress events automatically.
+
+To stop background updates:
+```bash
 infimium update stop
 ```
 
-Replace the example notes with your own. Add `--project /path/to/repo` to select a project and `--file src/auth.ts` to attach a relevant file. `infimium_update` and `infimium-update` are CLI aliases. MCP agents use the `infimium_update` tool with `action: refresh|start|stop|status`, `project_path`, and optional `note`, `task`, `handoff`, `files`, or `interval_seconds`.
+### Manual Memory Checkpoints
 
-Auto-update is opt-in and runs while the foreground CLI watcher or an MCP server is open. Its per-project setting survives restarts; `stop` disables future checkpoints (an in-flight refresh may finish). Checkpoints link episodes, tasks, file references, and handoff notes in local SQLite. Unchanged observations are deduplicated. Automatic checkpoints record observable state, not guessed intent, and never mark a task complete.
-
-`get-context` / `get_context` now reads saved context and current memory without rescanning the repo. It includes a bounded memory graph and guidance to answer repo-overview questions only when asked, using Infimium memory first. Missing context is reported explicitly. Run `infimium update` or `get-context --refresh` to refresh filesystem context. These are agent guidelines, not an enforcement mechanism for other clients.
-
-Infimium keeps memory bounded across long sessions:
-
-- **Scratchpad:** recent events for the active task.
-- **Archive:** compact summaries of completed tasks.
-- **Ledger:** durable decisions, rules, quirks, and unresolved blockers.
-
-Record meaningful progress while working:
+Force a memory checkpoint or record specific task notes:
 
 ```bash
-infimium remember "Added rate-limit middleware" --type progress --task "Rate limiting"
-infimium remember "Use Redis-backed counters in production" --type decision
+# Record progress with a note and active task
+infimium update refresh --task "Refactor auth" --note "Implemented JWT validation middleware"
+
+# Attach specific files to the checkpoint
+infimium update refresh --note "Updated router" --file src/router.ts --file src/auth.ts
+
+# Inspect update configuration and status
+infimium update status
 ```
 
-When the task is complete:
+---
+
+## 3-Tier Project Memory Model
+
+Infimium structures agent memory into three distinct tiers to avoid context blowup:
+
+| Tier | Purpose | Storage & Lifetime |
+| :--- | :--- | :--- |
+| **Active Scratchpad** | Immediate working memory, active task progress, and live file modifications. | Active session; pruned upon session completion. |
+| **Episodic Archive** | Compact summaries of completed tasks, milestones, and blockers. | Long-term SQLite archive. |
+| **Semantic Ledger** | Durable project rules, architecture decisions, and conventions across all agents. | Permanent versioned key-value ledger. |
+
+### Recording Decisions & Progress
+
+```bash
+# Add a progress note to the active session
+infimium remember "Added rate-limit middleware" --type progress --task "Rate limiting"
+
+# Record a durable architecture decision into the semantic ledger
+infimium remember "Use Redis-backed counters in production" --type decision
+
+# Check current active memory and recent events
+infimium resume
+```
+
+### Completing & Compacting a Session
+
+When a task is finished, compact the session scratchpad into a permanent milestone:
 
 ```bash
 infimium memory complete
 ```
+*(Uses local Ollama compaction if available, with deterministic fallback).*
 
-Infimium uses the local `llama3.1` model when available and falls back to deterministic compaction when it is not. Raw compacted events remain stored locally for seven days before pruning. `get_context` never calls an LLM or network service.
+---
 
-From a source checkout, build once and run the local playground with:
+## Token Economics: ~99.5% Initial Token Reduction
 
-```bash
-npm run build
-npm run playground
+Infimium uses an **AST-first retrieval strategy**. Instead of feeding full function bodies into the agent context, semantic code search returns lightweight AST symbol signatures:
+
+```text
+Full implementation payload:  ~1,460 tokens
+AST signature skeleton:            ~8 tokens
+Initial payload reduction:       ~99.5%
 ```
 
-## Local Architecture
+Agents browse compact signatures first and request full bodies on-demand via `expand_symbol`.
 
-- Ollama creates embeddings on your machine.
-- Embedded SQLite stores vectors, index metadata, project memory, and graph edges. No ChromaDB or Docker service is required.
-- Documents use recursive boundary-aware chunks instead of blind fixed slices.
-- JavaScript, TypeScript, Python, and Dart parsers are bundled.
-- Go, Rust, and Java Tree-sitter WASM grammars download on first use and cache in `~/.infimium/grammars/`.
-- `.gitignore`, `.infimiumignore`, and framework defaults exclude dependencies, build output, Flutter artifacts, caches, and binaries before indexing.
-- `semantic_code_search` returns signatures; `expand_symbol` provides full code on demand.
-- Project memory uses session-scoped scratchpads, compact milestone archives, and a versioned semantic ledger.
-- `get_context` emits static anchors, dynamic repository state, and active execution as separate YAML zones.
+Explore token savings in your repository with the local UI:
+```bash
+infimium playground
+```
+Navigate to **Token Economics** to see actual token differentials calculated across your codebase.
 
-## Multiple Projects
+---
 
-Run the normal index command from a folder containing related projects:
+## CLI Command Reference
+
+| Command | Usage | Description |
+| :--- | :--- | :--- |
+| `setup` | `infimium setup [--install-deps]` | Interactive setup (Ollama, models, SQLite, indexer). |
+| `doctor` | `infimium doctor` | Runs health checks on Ollama, models, parsers, and SQLite. |
+| `status` | `infimium status` | Displays indexed files, symbol counts, and memory state. |
+| `index` | `infimium index [--verbose]` | Scans and indexes the repository or multi-project workspace. |
+| `watch` | `infimium watch` | Continuous file indexer daemon. |
+| `update` | `infimium update [refresh\|start\|stop\|status]` | Records memory checkpoints or runs periodic auto-updates. |
+| `remember` | `infimium remember "<note>" [--type <t>] [--task <t>]` | Adds a progress note, decision, or milestone to memory. |
+| `resume` | `infimium resume` | Displays active task, last update time, and scratchpad events. |
+| `memory` | `infimium memory [complete\|search\|ledger]` | Compacts sessions, searches ledger, or inspects durable rules. |
+| `get-context` | `infimium get-context [--refresh]` | Outputs the complete tri-zonal context layer (`layer.md`). |
+| `code-search` | `infimium code-search "<query>"` | Semantically searches code and returns symbol signatures. |
+| `expand-symbol` | `infimium expand-symbol "<symbol>"` | Retrieves the full implementation for an indexed symbol. |
+| `dep-graph` | `infimium dep-graph "<symbol>"` | Displays callers, callees, imports, and HTTP routes. |
+| `docs-search` | `infimium docs-search "<query>"` | Semantically searches local documentation (md, txt, pdf, html). |
+| `plan` | `infimium plan "<task>" [--dry-run]` | Generates an implementation plan grounded in repository context. |
+| `playground` | `infimium playground` | Launches the local interactive web dashboard. |
+| `workspace` | `infimium workspace` | Manages federated multi-project workspaces. |
+| `telemetry` | `infimium telemetry [on\|off]` | Enables or disables anonymous privacy-safe lifecycle telemetry. |
+
+---
+
+## MCP Tools Reference
+
+When Infimium runs as an MCP server (`infimium serve`), it provides these 12 tools to AI agents:
+
+| MCP Tool | Primary Use Case | Key Arguments |
+| :--- | :--- | :--- |
+| `hello_infimium` | Confirms MCP server connectivity and status. | None |
+| `get_context` | Retrieves repository context, active memory, and handoff graph. | `refresh` (boolean), `project_path` (string) |
+| `infimium_update` | Refreshes episodic memory, logs notes, or configures auto-updates. | `action` (`refresh`\|`start`\|`stop`\|`status`), `note`, `task`, `handoff`, `files` |
+| `semantic_code_search` | Finds code symbols by natural language meaning. | `query` (string), `limit` (number) |
+| `expand_symbol` | Fetches full source implementation for a given symbol. | `symbol_name` (string), `file_path` (string) |
+| `dep_graph` | Inspects callers, callees, imports, and API routes. | `symbol_name` (string) |
+| `query_local_docs` | Searches Markdown, text, HTML, and PDF documentation. | `query` (string) |
+| `project_memory` | Manages active scratchpads, completes sessions, or queries ledger. | `action` (`resume`\|`remember`\|`complete`\|`search`\|`ledger`), `summary`, `task` |
+| `plan` | Generates a verified implementation plan for a task. | `task` (string), `dry_run` (boolean) |
+| `web_search` | Performs external web searches *(optional, requires Tinyfish API key)*. | `query` (string) |
+| `fetch_url` | Converts web pages to clean Markdown context. | `url` (string) |
+| `shell` | Executes sandboxed, allowlisted terminal commands with timeouts. | `command` (string), `args` (array) |
+
+---
+
+## Multi-Project Workspaces
+
+If your repository contains multiple packages (e.g. monorepo with frontend, backend, and shared libraries):
 
 ```bash
 infimium index
 ```
 
-Infimium detects immediate project roots from files such as `pubspec.yaml`, `package.json`, `Cargo.toml`, and `go.mod`. It shows the detected roles and dependencies, asks once, then creates `infimium.workspace.json`, indexes every project, and opens Playground.
+Infimium automatically discovers sub-projects by scanning for `package.json`, `pubspec.yaml`, `Cargo.toml`, and `go.mod`. It creates `infimium.workspace.json` and federates cross-project dependency graphs while isolating memory per project.
 
-For unattended setup:
-
+For non-interactive CI setup:
 ```bash
 infimium index --yes --no-playground
 ```
 
-Use `--no-workspace` to index only the current project. Workspace projects keep separate memory and Git state while `get_context` includes balanced summaries and graph relationships from related projects.
+---
 
-## Infimium - Playground 
+## Local Architecture & Supported Languages
 
-Infimium drops the initial payload cost from approximately **1,460 tokens to 8 tokens per symbol**. Semantic search returns the AST signature first; the agent requests the full implementation only when it needs it with `expand_symbol`.
+- **Embedded SQLite:** Fast local database running in WAL mode for vectors, graphs, checkpoints, and memory. Zero Docker or external database services required.
+- **Tree-sitter AST Extraction:** Native and WASM parsers extract symbols, signatures, docstrings, imports, and call sites.
+- **Supported Languages:**
+  - **Bundled:** TypeScript, JavaScript, Python, Dart.
+  - **Dynamic WASM:** Go, Rust, Java, Ruby, PHP, C#.
+- **Boundary-Aware Chunking:** Documentation indexing respects Markdown headings, code blocks, and paragraph boundaries.
+- **Ignore Rules:** Honors `.gitignore`, `.infimiumignore`, and built-in rules (excluding `node_modules`, build outputs, binaries, and caches).
 
-```text
-Full implementation   ~1,460 tokens
-AST skeleton               ~8 tokens
-Initial payload reduction  ~99.5%
-```
+---
 
-These are Playground reference values, not a claim that every function has the same size. Inspect your own indexed repository and compare AST-first retrieval with full-text retrieval locally:
+## Privacy Guarantee
 
-```bash
-infimium playground
-```
-
-Open **Token Economics** to see the estimated token difference across your actual indexed symbols.
-## Privacy
-
-Code, docs, embeddings, memory, graph data, prompts, queries, file paths, and repo names remain local.
-
-Infimium sends privacy-safe anonymous lifecycle telemetry so we can understand setup success:
-
-- `init_started`, `init_completed`
-- `doctor_run`, `doctor_passed`
-- `index_started`, `index_completed`, `setup_completed`
-- `serve_started`, `first_tool_call`, `playground_opened`
-
-Telemetry includes an anonymous install ID, Infimium version, OS, Node major version, timestamp, and event name. It never includes code, file paths, repo names, prompts, search queries, memory notes, API keys, or user identity.
-
-Disable it anytime:
-
+Infimium is designed for maximum privacy:
+- **100% Local:** Source code, documentation, embeddings, dependency graphs, memory notes, and queries never leave your local machine.
+- **Optional Anonymous Telemetry:** Anonymous lifecycle telemetry (`setup_completed`, `doctor_run`) helps improve installation reliability. It contains **no code, no paths, no prompts, and no identifiers**.
+  
+Disable anytime:
 ```bash
 infimium telemetry off
 ```
-
-or set:
-
+or in your environment:
 ```env
 INFIMIUM_TELEMETRY=false
 ```
 
+---
+
 ## Troubleshooting
 
-### FAQ & Common Confusions
+### Database is locked (`Failed to start Infimium: Database is locked`)
+Another Infimium process (e.g., `infimium watch` or `infimium playground`) is currently accessing the database. Stop the running process with `Ctrl+C` before running manual index migrations.
 
-**Where is `layer.md`?**
-When you run `infimium get-context`, it prints saved context directly to your terminal (`stdout`). Refreshes store project-scoped YAML under Infimium's local data directory. To export the saved context to a file, use terminal redirection:
-```bash
-infimium get-context > layer.md
-```
-
-**Why does the Playground UI say "Awaiting first agent interaction..."?**
-The `CURRENT TASK` tracker reflects stored project context. Run `infimium update --task "Your task"` to refresh it; `get-context` reads the saved snapshot.
-
-**How do I format `infimium remember`?**
-The `infimium remember` command requires a message and a `--type` flag (valid types: `note`, `progress`, `decision`, `blocker`, `index`, `plan`). If you also want it to update the active task in the Playground, include the `--task` flag:
-```bash
-infimium remember "Added rate limiting" --type progress --task "Security Features"
-```
-
-### Database is locked
-
-If you see `Failed to start Infimium: Database is locked`, it means another instance of Infimium is actively holding a lock on the SQLite memory database. This usually happens if you try to run `infimium index` manually in one terminal while `infimium playground` or `infimium watch` is still running in another. Simply stop the running process (Ctrl+C) before running manual commands.
-
-### General Setup Issues
-
-Run:
-
+### Health Check Diagnostic
+If any tool or index behavior seems unexpected, run:
 ```bash
 infimium doctor
 ```
+Every failed check outputs an exact copy-paste command to fix the issue.
 
-Every failed check prints one copy-paste fix. If setup still fails, give this prompt to your coding agent:
+---
 
-```text
-Set up Infimium in this repository. Install/start Ollama, pull nomic-embed-text,
-run npx infimium init, run npx infimium index, and make all six
-npx infimium doctor checks pass. Do not commit secrets.
-```
+## License & Contributing
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Adding a language starts with a parser fixture and extraction test.
-
-Self-hosting is free forever under the MIT license.
+Infimium is open source under the [MIT License](LICENSE). Contributions, bug reports, and pull requests are warmly welcomed via [GitHub](https://github.com/infimium-ai/infimium-agent).

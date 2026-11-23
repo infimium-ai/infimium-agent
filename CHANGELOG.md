@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.12
+
+- Reconciled C# dynamic grammar loading and language definitions with upstream `main`.
+- Bumped MCP server package metadata in `server.json` to 0.5.12.
+
+## 0.5.11
+
+- Added immediate initial evaluation on `infimium update start` so background memory syncing runs at launch without waiting for the initial interval timer.
+- Added intelligent workspace change comprehension that detects modified, added, and deleted files to produce structured progress summaries.
+- Synchronized automatic updates with the active memory scratchpad and `project_state.updated_at`, keeping `infimium resume` and `get_context` accurately updated.
+- Added real-time timestamped terminal logging for foreground auto-update watchers.
+- Modernized and expanded `README.md` with architecture diagrams, complete CLI command tables, MCP tool documentation, and troubleshooting guides.
+
 ## 0.5.10
 
 - Added `infimium update` and the `infimium_update` MCP tool for manual memory checkpoints and opt-in automatic updates.

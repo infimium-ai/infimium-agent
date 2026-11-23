@@ -12,7 +12,9 @@ export type DynamicGrammarName =
   | "java"
   | "csharp"
   | "typescript"
-  | "javascript";
+  | "javascript"
+  | "ruby"
+  | "php";
 
 export type DynamicGrammarOptions = {
   cacheDir?: string;
@@ -29,7 +31,9 @@ const GRAMMAR_FILES: Record<DynamicGrammarName, string> = {
   java: "tree-sitter-java.wasm",
   csharp: "tree-sitter-c_sharp.wasm",
   typescript: "tree-sitter-typescript.wasm",
-  javascript: "tree-sitter-javascript.wasm"
+  javascript: "tree-sitter-javascript.wasm",
+  ruby: "tree-sitter-ruby.wasm",
+  php: "tree-sitter-php.wasm"
 };
 const MAX_GRAMMAR_BYTES = 8 * 1024 * 1024;
 const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d];

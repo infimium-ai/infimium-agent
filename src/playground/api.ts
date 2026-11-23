@@ -399,7 +399,9 @@ export function readPlaygroundWorkspace(
   projectPath: string = process.cwd()
 ): PlaygroundGraph {
   const paths = resolvePlaygroundPaths(projectPath);
-  const workspace = readWorkspace(paths.projectPath) ?? readRegisteredWorkspaceForProject(paths.projectPath);
+  const manifestWorkspace = readWorkspace(paths.projectPath);
+  const workspace = manifestWorkspace && (findWorkspaceProject(manifestWorkspace, paths.projectPath) || canonicalPath(manifestWorkspace.rootPath) === paths.projectPath)
+    ? manifestWorkspace : readRegisteredWorkspaceForProject(paths.projectPath);
   if (workspace) {
     return readFederatedWorkspace(workspace, paths.graphDbPath);
   }
@@ -412,7 +414,8 @@ export function readPlaygroundScope(
 ): PlaygroundScope {
   const resolvedPath = canonicalPath(projectPath);
   const workspaces = readAvailableWorkspaces(resolvedPath);
-  if (workspaces.length === 0) {
+  const workspace = workspaces.find((candidate) => findWorkspaceProject(candidate, resolvedPath) || canonicalPath(candidate.rootPath) === resolvedPath);
+  if (!workspace) {
     const paths = resolvePlaygroundPaths(resolvedPath);
     const watchedPaths = readWatchedProjectPaths(paths.graphDbPath, resolvedPath);
     const projects = watchedPaths.map((path) => ({
@@ -427,14 +430,18 @@ export function readPlaygroundScope(
       activeWorkspaceId: null,
       workspaceName: null,
       activeProjectPath: resolvedPath,
-      workspaces: [],
+      workspaces: workspaces.map(candidate => ({
+        id: candidate.workspaceId,
+        name: candidate.name,
+        active: false,
+        projects: candidate.projects.map(project => ({
+          id: project.id, name: project.id, path: project.path, role: project.role, active: false
+        }))
+      })),
       projects
     };
   }
 
-  const workspace =
-    workspaces.find((candidate) => findWorkspaceProject(candidate, resolvedPath)) ??
-    workspaces[0];
   const activeProject =
     findWorkspaceProject(workspace, resolvedPath) ??
     workspace.projects.find((project) => project.role === "active") ??
@@ -709,7 +716,8 @@ function readWorkspace(projectPath: string): InfimiumWorkspace | null {
   const manifestPath = findWorkspaceManifest(projectPath);
   if (!manifestPath) return null;
   try {
-    return loadWorkspace(manifestPath);
+    const workspace = loadWorkspace(manifestPath);
+    return { ...workspace, projects: workspace.projects.map(project => ({ ...project, path: canonicalPath(project.path) })) };
   } catch {
     return null;
   }
@@ -810,7 +818,7 @@ function readRegisteredWorkspacesFromDb(db: Database.Database): InfimiumWorkspac
       if (projectWorkspaceId !== workspaceId || !id || !path) return [];
       return [{
         id,
-        path,
+        path: canonicalPath(path),
         role: readString(projectRow.role),
         dependsOn: dependsOn.get(`${workspaceId}\u0000${id}`) ?? []
       }];

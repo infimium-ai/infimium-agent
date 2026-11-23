@@ -22,7 +22,9 @@ export type CodeLanguage =
   | "go"
   | "rust"
   | "java"
-  | "csharp";
+  | "csharp"
+  | "ruby"
+  | "php";
 
 export type CodeSymbol = {
   name: string;
@@ -37,15 +39,17 @@ export type CodeSymbol = {
 
 type SymbolType = CodeSymbol["type"];
 
-const JS_EXTENSIONS = new Set([".js", ".jsx", ".mjs"]);
-const TS_EXTENSIONS = new Set([".ts", ".tsx"]);
+const JS_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
+const TS_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const PY_EXTENSIONS = new Set([".py"]);
 const DART_EXTENSIONS = new Set([".dart"]);
 const DYNAMIC_EXTENSIONS = new Map<string, DynamicGrammarName>([
   [".go", "go"],
   [".rs", "rust"],
   [".java", "java"],
-  [".cs", "csharp"]
+  [".cs", "csharp"],
+  [".rb", "ruby"],
+  [".php", "php"]
 ]);
 const { tsx, typescript } = TypeScriptGrammars;
 
@@ -115,7 +119,10 @@ export class CodeParser {
     // TypeScript, JavaScript, Python, Dart: try native parser first.
     // If native fails for TS/JS, fall back to WASM.
     try {
-      return this.parseFile(filePath);
+      const symbols = this.parseFile(filePath);
+      if (symbols.length || (language !== "typescript" && language !== "javascript")) return symbols;
+      // parseFile catches native errors, so an empty result must also try WASM.
+      throw new Error("Native parser returned no symbols");
     } catch {
       if (language === "typescript" || language === "javascript") {
         try {
@@ -184,18 +191,20 @@ function loadLanguage(filePath: string, language: CodeLanguage): Language {
 }
 
 function isDynamicLanguage(language: CodeLanguage): language is DynamicGrammarName {
-  return language === "go" || language === "rust" || language === "java" || language === "typescript" || language === "javascript";
-}
-
-function isWasmOnlyLanguage(
-  language: CodeLanguage
-): language is "go" | "rust" | "java" | "csharp" {
   return (
     language === "go" ||
     language === "rust" ||
     language === "java" ||
-    language === "csharp"
+    language === "csharp" ||
+    language === "typescript" ||
+    language === "javascript" ||
+    language === "ruby" ||
+    language === "php"
   );
+}
+
+function isWasmOnlyLanguage(language: CodeLanguage): language is Exclude<DynamicGrammarName, "typescript" | "javascript"> {
+  return isDynamicLanguage(language) && language !== "typescript" && language !== "javascript";
 }
 
 function extractDynamicSymbols(
@@ -251,6 +260,16 @@ function dynamicSymbolType(
         node.type
       )
     ) return "class";
+  }
+
+  if (language === "ruby") {
+    if (["method", "singleton_method"].includes(node.type)) return "method";
+    if (["class", "module"].includes(node.type)) return "class";
+  }
+  if (language === "php") {
+    if (node.type === "function_definition") return "function";
+    if (node.type === "method_declaration") return "method";
+    if (["class_declaration", "interface_declaration", "trait_declaration", "enum_declaration"].includes(node.type)) return "class";
   }
 
   if (language === "typescript" || language === "javascript") {

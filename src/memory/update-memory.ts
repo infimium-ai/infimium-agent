@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { ContextLayerWriter } from "./context-layer.js";
-import { ProjectMemoryStore } from "./project-memory.js";
+import { ProjectMemoryStore, type MemoryCheckpoint } from "./project-memory.js";
 import { createProjectId } from "./project-overview.js";
 import { createProjectFilePolicy } from "../indexer/project-files.js";
 
@@ -60,9 +60,13 @@ export async function updateMemory(input: MemoryUpdateInput, existingStore?: Pro
       const info = await stat(resolve(projectPath, file)).catch(() => null);
       return [file, info?.mtimeMs ?? null, info?.size ?? null];
     }));
-    const summary = input.note?.trim() ??
-      `Observed workspace state: ${snapshot.dynamicState.workingTree.summary}. ` +
-      (snapshot.activeExecution.lastNote ? `Last recorded progress: ${snapshot.activeExecution.lastNote}` : "No progress note recorded.");
+    const autoSummary = snapshot.dynamicState.workingTree.dirty && snapshot.dynamicState.workingTree.changedFiles.length > 0
+      ? `Auto-detected changes in ${snapshot.dynamicState.workingTree.totalChangedFiles} file(s): ` +
+        snapshot.dynamicState.workingTree.changedFiles.slice(0, 4).map((f) => `${f.status} ${f.path}`).join(", ") +
+        (snapshot.dynamicState.workingTree.totalChangedFiles > 4 ? ` (+${snapshot.dynamicState.workingTree.totalChangedFiles - 4} more)` : "")
+      : `Observed workspace state: ${snapshot.dynamicState.workingTree.summary}. ` +
+        (snapshot.activeExecution.lastNote ? `Last recorded progress: ${snapshot.activeExecution.lastNote}` : "No progress note recorded.");
+    const summary = input.note?.trim() ?? autoSummary;
     const fingerprint = createHash("sha256").update(JSON.stringify({
       task, handoff, fileStates, workingTree: snapshot.dynamicState.workingTree,
       lastNote: snapshot.activeExecution.lastNote, ledger: snapshot.activeExecution.semanticLedger,
@@ -72,6 +76,15 @@ export async function updateMemory(input: MemoryUpdateInput, existingStore?: Pro
       projectPath, summary: summary.slice(0, 2000), task, handoff, files: observedFiles,
       fingerprint, source: input.source ?? "manual", createdAt: Date.now()
     });
+    if (checkpoint && input.source === "automatic") {
+      store.remember({
+        projectPath,
+        summary: summary.slice(0, 500),
+        eventType: "progress",
+        createdAt: checkpoint.createdAt,
+        activateProject: false
+      });
+    }
     await writer.saveSnapshot(snapshot);
     return { projectPath, updated: checkpoint !== null, checkpoint,
       contextFile: snapshot.dynamicState.contextFilePath };
@@ -81,10 +94,18 @@ export async function updateMemory(input: MemoryUpdateInput, existingStore?: Pro
   }
 }
 
+export type MemoryUpdateTickEvent = {
+  projectPath: string;
+  updated: boolean;
+  summary: string;
+  checkpoint: MemoryCheckpoint | null;
+};
+
 export function startMemoryUpdateWorker(options: {
   store?: ProjectMemoryStore;
   projectPath?: string;
   pollMs?: number;
+  onUpdate?: (event: MemoryUpdateTickEvent) => void;
   onError?: (message: string) => void;
 } = {}) {
   const store = options.store ?? new ProjectMemoryStore();
@@ -98,8 +119,14 @@ export function startMemoryUpdateWorker(options: {
         if (stopped || !setting.enabled || (options.projectPath && setting.projectPath !== resolve(options.projectPath))) continue;
         if (!store.claimMemoryUpdate(setting.projectPath, Date.now())) continue;
         try {
-          await updateMemory({ projectPath: setting.projectPath, source: "automatic" }, store);
+          const result = await updateMemory({ projectPath: setting.projectPath, source: "automatic" }, store);
           store.setMemoryUpdateError(setting.projectPath, null);
+          options.onUpdate?.({
+            projectPath: setting.projectPath,
+            updated: result.updated,
+            summary: result.checkpoint?.summary ?? "Checked workspace: no changes detected",
+            checkpoint: result.checkpoint
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           store.setMemoryUpdateError(setting.projectPath, message);
