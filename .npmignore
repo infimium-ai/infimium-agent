@@ -1,0 +1,5 @@
+# Ignore docs and output
+docs/
+output/
+.infimium-private/
+*.local.md
