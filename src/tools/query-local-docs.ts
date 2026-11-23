@@ -1,6 +1,13 @@
 import { resolve } from "node:path";
 
 import { createVectorClient } from "../vector-store.js";
+import {
+  CircuitBreaker,
+  CircuitBreakerOpenError,
+  isTransientError,
+  type RetryConfig,
+  retryWithBackoff
+} from "./resilience.js";
 
 const COLLECTION_NAME = "infimium_docs";
 export const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
@@ -46,23 +53,40 @@ type LocalDocsSearchOptions = {
   localDocsPath: string | null;
   ollamaHost?: string;
   vectorClient?: VectorClientLike;
+  retryConfig?: RetryConfig;
 };
 
 export class LocalDocsUnavailableError extends Error {
-  constructor() {
-    super("Local docs unavailable. Embedded vector index could not be opened.");
+  readonly details: string | undefined;
+
+  constructor(details?: string) {
+    const message = details
+      ? `Local docs unavailable: ${details}`
+      : "Local docs unavailable. Embedded vector index could not be opened.";
+    super(message);
+    this.name = "LocalDocsUnavailableError";
+    this.details = details;
   }
 }
 
 export class LocalDocsNotConfiguredError extends Error {
   constructor() {
     super("Add LOCAL_DOCS_PATH to your .env");
+    this.name = "LocalDocsNotConfiguredError";
   }
 }
 
 export class LocalDocsEmptyError extends Error {
   constructor() {
     super("No docs indexed. Run: infimium index");
+    this.name = "LocalDocsEmptyError";
+  }
+}
+
+export class LocalDocsDegradedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalDocsDegradedError";
   }
 }
 
@@ -70,11 +94,15 @@ export class LocalDocsSearch {
   private readonly localDocsPath: string | null;
   private readonly ollamaHost: string;
   private readonly vectorClient: VectorClientLike;
+  private readonly ollamaCircuitBreaker: CircuitBreaker;
+  private readonly retryConfig: RetryConfig | undefined;
 
   constructor(options: LocalDocsSearchOptions) {
     this.localDocsPath = options.localDocsPath ? resolve(options.localDocsPath) : null;
     this.ollamaHost = options.ollamaHost ?? DEFAULT_OLLAMA_HOST;
     this.vectorClient = options.vectorClient ?? createVectorClient();
+    this.retryConfig = options.retryConfig;
+    this.ollamaCircuitBreaker = new CircuitBreaker(3, 10_000, 1);
   }
 
   async search(query: string, topK: number): Promise<DocResult[]> {
@@ -83,10 +111,34 @@ export class LocalDocsSearch {
       throw new LocalDocsNotConfiguredError();
     }
 
-    const collection = await this.getCollection();
-    const results = await this.queryCollection(collection, query, topK, localDocsPath);
+    try {
+      const collection = await this.getCollection();
+      const results = await this.queryCollection(collection, query, topK, localDocsPath);
+      return deduplicateAdjacentChunks(results).slice(0, topK);
+    } catch (error: unknown) {
+      if (error instanceof CircuitBreakerOpenError) {
+        throw new LocalDocsDegradedError(
+          "Local docs search is temporarily unavailable (Ollama unreachable). Try again in a few seconds."
+        );
+      }
 
-    return deduplicateAdjacentChunks(results).slice(0, topK);
+      if (isTransientError(error)) {
+        throw new LocalDocsDegradedError(
+          "Local docs search is temporarily unavailable (Ollama unreachable). Try again in a few seconds."
+        );
+      }
+
+      if (
+        error instanceof LocalDocsUnavailableError ||
+        error instanceof LocalDocsNotConfiguredError ||
+        error instanceof LocalDocsEmptyError ||
+        error instanceof LocalDocsDegradedError
+      ) {
+        throw error;
+      }
+
+      throw error;
+    }
   }
 
   private async getCollection(): Promise<CollectionLike> {
@@ -96,11 +148,13 @@ export class LocalDocsSearch {
         embeddingFunction: null
       });
     } catch (error: unknown) {
-      if (isConnectionError(error)) {
+      if (isTransientError(error)) {
         throw new LocalDocsUnavailableError();
       }
 
-      throw error;
+      throw new LocalDocsUnavailableError(
+        error instanceof Error ? error.message : "Unknown error opening vector store"
+      );
     }
   }
 
@@ -116,7 +170,7 @@ export class LocalDocsSearch {
         throw new LocalDocsEmptyError();
       }
 
-      const queryEmbedding = await this.embedQuery(query);
+      const queryEmbedding = await this.embedQueryWithRetry(query);
       const rawResults = await collection.query({
         queryEmbeddings: [queryEmbedding],
         nResults: topK * 2,
@@ -130,12 +184,22 @@ export class LocalDocsSearch {
         throw error;
       }
 
-      if (isConnectionError(error)) {
+      if (isTransientError(error)) {
         throw new LocalDocsUnavailableError();
       }
 
-      throw error;
+      throw new LocalDocsUnavailableError(
+        error instanceof Error ? error.message : "Vector store query error"
+      );
     }
+  }
+
+  private async embedQueryWithRetry(query: string): Promise<number[]> {
+    return retryWithBackoff(
+      () => this.ollamaCircuitBreaker.execute(() => this.embedQuery(query)),
+      (error) => isTransientError(error) && !(error instanceof CircuitBreakerOpenError),
+      this.retryConfig
+    );
   }
 
   private async embedQuery(query: string): Promise<number[]> {
@@ -218,20 +282,6 @@ function deduplicateAdjacentChunks(results: DocResult[]): DocResult[] {
   return deduped.sort((a, b) => b.score - a.score);
 }
 
-function isConnectionError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("econnrefused") ||
-    message.includes("connection refused") ||
-    message.includes("failed to connect") ||
-    message.includes("sqlite")
-  );
-}
-
 export function formatDocResults(results: DocResult[]): string {
   if (results.length === 0) {
     return "No docs indexed. Run: infimium index";
@@ -253,15 +303,24 @@ export async function runQueryLocalDocs(
   try {
     const search = new LocalDocsSearch(options);
     const results = await search.search(query, topK);
-
     return formatDocResults(results);
   } catch (error: unknown) {
-    if (
-      error instanceof LocalDocsUnavailableError ||
-      error instanceof LocalDocsNotConfiguredError ||
-      error instanceof LocalDocsEmptyError
-    ) {
+    if (error instanceof LocalDocsNotConfiguredError) {
       return error.message;
+    }
+
+    if (error instanceof LocalDocsEmptyError) {
+      return error.message;
+    }
+
+    if (error instanceof LocalDocsDegradedError) {
+      return `${error.message}\nTip: Check Ollama status with 'infimium doctor' or run 'ollama serve'.`;
+    }
+
+    if (error instanceof LocalDocsUnavailableError) {
+      return error.details
+        ? `${error.message}\nTip: Run 'infimium doctor' to diagnose issues.`
+        : error.message;
     }
 
     const message = error instanceof Error ? error.message : String(error);

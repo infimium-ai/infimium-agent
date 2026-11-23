@@ -22,9 +22,9 @@ export type CodeLanguage =
   | "go"
   | "rust"
   | "java"
+  | "csharp"
   | "ruby"
-  | "php"
-  | "c_sharp";
+  | "php";
 
 export type CodeSymbol = {
   name: string;
@@ -47,9 +47,9 @@ const DYNAMIC_EXTENSIONS = new Map<string, DynamicGrammarName>([
   [".go", "go"],
   [".rs", "rust"],
   [".java", "java"],
+  [".cs", "csharp"],
   [".rb", "ruby"],
-  [".php", "php"],
-  [".cs", "c_sharp"]
+  [".php", "php"]
 ]);
 const { tsx, typescript } = TypeScriptGrammars;
 
@@ -96,7 +96,7 @@ export class CodeParser {
       return this.parseFile(filePath);
     }
 
-    // Go, Rust, Java: always use WASM parser (no native bindings bundled)
+    // Go, Rust, Java, C#: always use WASM parser (no native bindings bundled)
     if (isWasmOnlyLanguage(language)) {
       try {
         const source = readFileSync(filePath, "utf8");
@@ -191,7 +191,16 @@ function loadLanguage(filePath: string, language: CodeLanguage): Language {
 }
 
 function isDynamicLanguage(language: CodeLanguage): language is DynamicGrammarName {
-  return language === "go" || language === "rust" || language === "java" || language === "typescript" || language === "javascript" || language === "ruby" || language === "php" || language === "c_sharp";
+  return (
+    language === "go" ||
+    language === "rust" ||
+    language === "java" ||
+    language === "csharp" ||
+    language === "typescript" ||
+    language === "javascript" ||
+    language === "ruby" ||
+    language === "php"
+  );
 }
 
 function isWasmOnlyLanguage(language: CodeLanguage): language is Exclude<DynamicGrammarName, "typescript" | "javascript"> {
@@ -262,16 +271,32 @@ function dynamicSymbolType(
     if (node.type === "method_declaration") return "method";
     if (["class_declaration", "interface_declaration", "trait_declaration", "enum_declaration"].includes(node.type)) return "class";
   }
-  if (language === "c_sharp") {
-    if (["method_declaration", "constructor_declaration"].includes(node.type)) return "method";
-    if (["class_declaration", "interface_declaration", "struct_declaration", "record_declaration", "enum_declaration"].includes(node.type)) return "class";
-  }
 
   if (language === "typescript" || language === "javascript") {
     if (node.type === "function_declaration") return "function";
     if (node.type === "class_declaration") return "class";
     if (node.type === "method_definition") return "method";
     if (node.type === "arrow_function") return "arrow_function";
+  }
+  if (language === "csharp") {
+    if (
+      [
+        "class_declaration",
+        "interface_declaration",
+        "struct_declaration",
+        "enum_declaration",
+        "record_declaration"
+      ].includes(node.type)
+    ) {
+      return "class";
+    }
+
+    if (
+      node.type === "method_declaration" ||
+      node.type === "constructor_declaration"
+    ) {
+      return "method";
+    }
   }
 
   return null;
